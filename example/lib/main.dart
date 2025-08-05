@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 
 import 'package:flutter/services.dart';
-import 'package:tigg_printer/core/exception/custom_exception.dart';
 import 'package:tigg_printer/tigg_printer.dart';
 
 void main() {

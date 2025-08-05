@@ -2,6 +2,29 @@ import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 import 'tigg_printer_method_channel.dart';
 
+/// The result of a print operation
+class PrintResult {
+  final bool success;
+  final String message;
+
+  const PrintResult({required this.success, required this.message});
+
+  @override
+  String toString() => 'PrintResult(success: $success, message: $message)';
+}
+
+/// Exception thrown when printer operations fail
+class TiggPrinterException implements Exception {
+  final String code;
+  final String message;
+  final dynamic details;
+
+  const TiggPrinterException(this.code, this.message, [this.details]);
+
+  @override
+  String toString() => 'TiggPrinterException($code): $message';
+}
+
 abstract class TiggPrinterPlatform extends PlatformInterface {
   /// Constructs a TiggPrinterPlatform.
   TiggPrinterPlatform() : super(token: _token);
@@ -23,7 +46,36 @@ abstract class TiggPrinterPlatform extends PlatformInterface {
     _instance = instance;
   }
 
+  /// Get the platform version (for debugging/info purposes)
   Future<String?> getPlatformVersion() {
     throw UnimplementedError('platformVersion() has not been implemented.');
+  }
+
+  /// Print a base64 encoded image
+  Future<PrintResult> printBase64Image({
+    required String base64Image,
+    int textSize = 24,
+  }) {
+    throw UnimplementedError('printBase64Image() has not been implemented.');
+  }
+
+  /// Print plain text
+  Future<PrintResult> printText({required String text, int textSize = 24}) {
+    throw UnimplementedError('printText() has not been implemented.');
+  }
+
+  /// Check if the printer service is available
+  Future<bool> isPrinterAvailable() {
+    throw UnimplementedError('isPrinterAvailable() has not been implemented.');
+  }
+
+  /// Bind the printer service
+  Future<void> bindService() {
+    throw UnimplementedError('bindService() has not been implemented.');
+  }
+
+  /// Check if the printer service is connected
+  Future<bool> isServiceConnected() {
+    throw UnimplementedError('isServiceConnected() has not been implemented.');
   }
 }
