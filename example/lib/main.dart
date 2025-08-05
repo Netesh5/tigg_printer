@@ -34,11 +34,15 @@ class _MyAppState extends State<MyApp> {
         textSize: 24,
       );
       setState(() {
-        _printStatus = result;
+        _printStatus = 'Success: ${result.message}';
+      });
+    } on TiggPrinterException catch (e) {
+      setState(() {
+        _printStatus = 'Printer Error (${e.code}): ${e.message}';
       });
     } on PlatformException catch (e) {
       setState(() {
-        _printStatus = 'Print failed: ${e.message}';
+        _printStatus = 'Platform Error: ${e.message}';
       });
     } catch (e) {
       setState(() {
@@ -63,15 +67,47 @@ class _MyAppState extends State<MyApp> {
         textSize: 24,
       );
       setState(() {
-        _printStatus = result;
+        _printStatus = 'Success: ${result.message}';
+      });
+    } on TiggPrinterException catch (e) {
+      setState(() {
+        _printStatus = 'Printer Error (${e.code}): ${e.message}';
       });
     } on PlatformException catch (e) {
       setState(() {
-        _printStatus = 'Print failed: ${e.message}';
+        _printStatus = 'Platform Error: ${e.message}';
       });
     } catch (e) {
       setState(() {
         _printStatus = 'Unexpected error: $e';
+      });
+    } finally {
+      setState(() {
+        _isPrinting = false;
+      });
+    }
+  }
+
+  Future<void> _checkPrinterAvailability() async {
+    setState(() {
+      _isPrinting = true;
+      _printStatus = 'Checking printer availability...';
+    });
+
+    try {
+      final isAvailable = await TiggPrinter.isPrinterAvailable();
+      setState(() {
+        _printStatus = isAvailable
+            ? 'Printer is available ✓'
+            : 'Printer not available ✗';
+      });
+    } on TiggPrinterException catch (e) {
+      setState(() {
+        _printStatus = 'Check failed (${e.code}): ${e.message}';
+      });
+    } catch (e) {
+      setState(() {
+        _printStatus = 'Check error: $e';
       });
     } finally {
       setState(() {
@@ -95,6 +131,12 @@ class _MyAppState extends State<MyApp> {
                 style: const TextStyle(fontSize: 18),
               ),
               const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: _isPrinting ? null : _checkPrinterAvailability,
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                child: const Text('Check Printer Availability'),
+              ),
+              const SizedBox(height: 10),
               ElevatedButton(
                 onPressed: _isPrinting ? null : _printImage,
                 child: _isPrinting
