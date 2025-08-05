@@ -141,4 +141,32 @@ class MethodChannelTiggPrinter extends TiggPrinterPlatform {
       );
     }
   }
+
+  @override
+  Future<Map<String, dynamic>> getServiceDiagnostics() async {
+    try {
+      final result = await methodChannel.invokeMethod('getServiceDiagnostics');
+      return Map<String, dynamic>.from(result as Map);
+    } on PlatformException catch (e) {
+      throw TiggPrinterException(
+        e.code,
+        e.message ?? 'Failed to get service diagnostics',
+        e.details,
+      );
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> checkSystemServices() async {
+    try {
+      final result = await methodChannel.invokeMethod('checkSystemServices');
+      return Map<String, dynamic>.from(result as Map);
+    } on PlatformException catch (e) {
+      throw TiggPrinterException(
+        e.code,
+        e.message ?? 'Failed to check system services',
+        e.details,
+      );
+    }
+  }
 }

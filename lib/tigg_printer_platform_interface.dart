@@ -78,4 +78,16 @@ abstract class TiggPrinterPlatform extends PlatformInterface {
   Future<bool> isServiceConnected() {
     throw UnimplementedError('isServiceConnected() has not been implemented.');
   }
+
+  /// Get detailed service diagnostics for debugging
+  Future<Map<String, dynamic>> getServiceDiagnostics() {
+    throw UnimplementedError(
+      'getServiceDiagnostics() has not been implemented.',
+    );
+  }
+
+  /// Check system services and packages related to TiggPrinter
+  Future<Map<String, dynamic>> checkSystemServices() {
+    throw UnimplementedError('checkSystemServices() has not been implemented.');
+  }
 }

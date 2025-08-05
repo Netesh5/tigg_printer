@@ -1,3 +1,5 @@
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
 import 'dart:async';
 
@@ -63,6 +65,80 @@ class _MyAppState extends State<MyApp> {
     } catch (e) {
       setState(() {
         _printStatus = 'Bind error: $e';
+      });
+    } finally {
+      setState(() {
+        _isPrinting = false;
+      });
+    }
+  }
+
+  Future<void> _getDiagnostics() async {
+    setState(() {
+      _isPrinting = true;
+      _printStatus = 'Getting diagnostics...';
+    });
+
+    try {
+      final diagnostics = await TiggPrinter.getServiceDiagnostics();
+      final buffer = StringBuffer('Service Diagnostics:\n');
+      diagnostics.forEach((key, value) {
+        buffer.writeln('  $key: $value');
+        log(diagnostics.toString());
+      });
+      setState(() {
+        _printStatus = buffer.toString();
+      });
+    } on TiggPrinterException catch (e) {
+      setState(() {
+        _printStatus = 'Diagnostics failed (${e.code}): ${e.message}';
+      });
+    } catch (e) {
+      setState(() {
+        _printStatus = 'Diagnostics error: $e';
+      });
+    } finally {
+      setState(() {
+        _isPrinting = false;
+      });
+    }
+  }
+
+  Future<void> _checkSystemServices() async {
+    setState(() {
+      _isPrinting = true;
+      _printStatus = 'Checking system services...';
+    });
+
+    try {
+      final systemInfo = await TiggPrinter.checkSystemServices();
+      final buffer = StringBuffer('System Services:\n');
+      systemInfo.forEach((key, value) {
+        if (value is List) {
+          buffer.writeln('  $key: ${value.length} items');
+          for (var item in value) {
+            if (item is Map) {
+              buffer.writeln(
+                '    - ${item['packageName'] ?? item['className'] ?? item}',
+              );
+            } else {
+              buffer.writeln('    - $item');
+            }
+          }
+        } else {
+          buffer.writeln('  $key: $value');
+        }
+      });
+      setState(() {
+        _printStatus = buffer.toString();
+      });
+    } on TiggPrinterException catch (e) {
+      setState(() {
+        _printStatus = 'System check failed (${e.code}): ${e.message}';
+      });
+    } catch (e) {
+      setState(() {
+        _printStatus = 'System check error: $e';
       });
     } finally {
       setState(() {
@@ -228,6 +304,18 @@ class _MyAppState extends State<MyApp> {
                     child: const Text('Check Status'),
                   ),
                 ],
+              ),
+              const SizedBox(height: 10),
+              ElevatedButton(
+                onPressed: _isPrinting ? null : _getDiagnostics,
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.purple),
+                child: const Text('Get Diagnostics'),
+              ),
+              const SizedBox(height: 10),
+              ElevatedButton(
+                onPressed: _isPrinting ? null : _checkSystemServices,
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
+                child: const Text('Check System Services'),
               ),
               const SizedBox(height: 20),
               ElevatedButton(

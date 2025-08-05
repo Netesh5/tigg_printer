@@ -82,4 +82,16 @@ class TiggPrinter {
   static Future<bool> isServiceConnected() {
     return TiggPrinterPlatform.instance.isServiceConnected();
   }
+
+  /// Get detailed service diagnostics for debugging
+  /// This provides detailed information about the service state
+  static Future<Map<String, dynamic>> getServiceDiagnostics() {
+    return TiggPrinterPlatform.instance.getServiceDiagnostics();
+  }
+
+  /// Check system services and packages related to TiggPrinter
+  /// This helps identify if TiggPrinter services are running on the device
+  static Future<Map<String, dynamic>> checkSystemServices() {
+    return TiggPrinterPlatform.instance.checkSystemServices();
+  }
 }
