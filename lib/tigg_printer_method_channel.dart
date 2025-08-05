@@ -120,6 +120,12 @@ class MethodChannelTiggPrinter extends TiggPrinterPlatform {
     try {
       await methodChannel.invokeMethod('bindService');
     } on PlatformException catch (e) {
+      // Handle specific binding failures
+      if (e.code == 'BIND_FAILED' &&
+          e.message?.contains('connection failed') == true) {
+        // Wait a moment before potentially allowing retry
+        await Future.delayed(const Duration(seconds: 2));
+      }
       throw TiggPrinterException(
         e.code,
         e.message ?? 'Failed to bind printer service',

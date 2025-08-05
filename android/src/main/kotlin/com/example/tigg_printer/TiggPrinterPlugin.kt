@@ -31,25 +31,30 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         channel = MethodChannel(binding.binaryMessenger, "tigg_printer")
         channel.setMethodCallHandler(this)
         
-        try {
-            Log.i("TiggPrinter", "Initializing AppService...")
-            AppService.me().init(context)
-            AppService.me().setPackageName(context.packageName)
-            
-            Log.i("TiggPrinter", "Attempting to bind service...")
-            val bindResult = AppService.me().bindService()
-            Log.i("TiggPrinter", "Service bind result: $bindResult")
-            
-            // Give some time for the service to connect
-            Thread {
+
+        Thread {
+            try {
+                Log.i("TiggPrinter", "Initializing AppService in background...")
+                AppService.me().init(context)
+                AppService.me().setPackageName(context.packageName)
+                
+                
+                Log.i("TiggPrinter", "Attempting initial service bind...")
+                val bindResult = AppService.me().bindService()
+                Log.i("TiggPrinter", "Initial service bind result: $bindResult")
+
                 Thread.sleep(1000)
                 val isConnected = AppService.me()?.isServiceConnected() ?: false
-                Log.i("TiggPrinter", "Service connection status after 1s: $isConnected")
-            }.start()
-            
-        } catch (e: Exception) {
-            Log.e("TiggPrinter", "Failed to initialize AppService: ${e.message}", e)
-        }
+                Log.i("TiggPrinter", "Initial service connection status: $isConnected")
+                
+                if (!isConnected) {
+                    Log.w("TiggPrinter", "Service not connected after initial bind. Will retry on demand.")
+                }
+                
+            } catch (e: Exception) {
+                Log.e("TiggPrinter", "Failed to initialize AppService: ${e.message}", e)
+            }
+        }.start()
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -68,55 +73,57 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
             }
             "bindService" -> {
-                try {
-                    Log.i("TiggPrinter", "Manual bind service requested")
-                    
-                    // First check if AppService is initialized
-                    if (AppService.me() == null) {
-                        Log.e("TiggPrinter", "AppService is not initialized")
-                        result.error("SERVICE_NOT_INITIALIZED", "AppService is not initialized", null)
-                        return
-                    }
-                    
-                    // Check current connection status
-                    val currentStatus = AppService.me().isServiceConnected()
-                    Log.i("TiggPrinter", "Current service connection status: $currentStatus")
-                    
-                    if (currentStatus) {
-                        result.success("Service is already connected")
-                        return
-                    }
-                    
-                    // Attempt to bind
-                    val bindResult = AppService.me().bindService()
-                    Log.i("TiggPrinter", "Bind service result: $bindResult")
-                    
-                    // Wait a moment and check connection status
-                    Thread {
-                        try {
-                            Thread.sleep(2000) // Wait 2 seconds for connection
-                            val finalStatus = AppService.me()?.isServiceConnected() ?: false
-                            Log.i("TiggPrinter", "Service connection status after bind: $finalStatus")
-                            
-                            // Return result on main thread
+                // Execute binding in background to avoid blocking main thread
+                Thread {
+                    try {
+                        Log.i("TiggPrinter", "Manual bind service requested")
+                        
+                        // First check if AppService is initialized
+                        if (AppService.me() == null) {
+                            Log.e("TiggPrinter", "AppService is not initialized")
                             context.mainExecutor.execute {
-                                if (finalStatus) {
-                                    result.success("Service bound and connected successfully")
-                                } else {
-                                    result.error("BIND_FAILED", "Service bind initiated but connection failed. Check if TiggPrinter device is available.", null)
-                                }
+                                result.error("SERVICE_NOT_INITIALIZED", "AppService is not initialized", null)
                             }
-                        } catch (e: Exception) {
+                            return@Thread
+                        }
+                        
+                        // Check current connection status
+                        val currentStatus = AppService.me().isServiceConnected()
+                        Log.i("TiggPrinter", "Current service connection status: $currentStatus")
+                        
+                        if (currentStatus) {
                             context.mainExecutor.execute {
-                                result.error("BIND_ERROR", "Error during service binding: ${e.message}", null)
+                                result.success("Service is already connected")
+                            }
+                            return@Thread
+                        }
+                        
+                        // Attempt to bind with timeout to prevent hanging
+                        Log.i("TiggPrinter", "Attempting service bind...")
+                        val bindResult = AppService.me().bindService()
+                        Log.i("TiggPrinter", "Bind service result: $bindResult")
+                        
+                        // Short wait for connection - reduced from 2s to 1s
+                        Thread.sleep(1000)
+                        val finalStatus = AppService.me()?.isServiceConnected() ?: false
+                        Log.i("TiggPrinter", "Service connection status after bind: $finalStatus")
+                        
+                        // Return result on main thread
+                        context.mainExecutor.execute {
+                            if (finalStatus) {
+                                result.success("Service bound and connected successfully")
+                            } else {
+                                result.error("BIND_FAILED", "Service bind initiated but connection failed. TiggPrinter service may not be running.", null)
                             }
                         }
-                    }.start()
-                    
-                } catch (e: Exception) {
-                    Log.e("TiggPrinter", "Failed to bind service", e)
-                    result.error("BIND_FAILED", "Failed to bind service: ${e.message}", null)
-                }
+                        
+                    } catch (e: Exception) {
+                        Log.e("TiggPrinter", "Failed to bind service", e)
+                        context.mainExecutor.execute {
+                            result.error("BIND_ERROR", "Error during service binding: ${e.message}", null)
+                        }
+                    }
+                }.start()
             }
             "isServiceConnected" -> {
                 try {
@@ -129,68 +136,53 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
             }
             "getServiceDiagnostics" -> {
-                try {
-                    val diagnostics = mutableMapOf<String, Any>()
-                    
-                    // Check if AppService is initialized
-                    val appService = AppService.me()
-                    diagnostics["appServiceInitialized"] = (appService != null)
-                    diagnostics["packageName"] = context.packageName
-                    diagnostics["contextValid"] = this::context.isInitialized
-                    
-                    if (appService != null) {
-                        try {
-                            diagnostics["serviceConnected"] = appService.isServiceConnected()
-                            
-                            // Try to get more service details
-                            try {
-                                // Attempt to rebind and get detailed status
-                                Log.i("TiggPrinter", "Diagnostics: Attempting service rebind...")
-                                appService.bindService()
-                                diagnostics["rebindAttemptResult"] = "Rebind attempt completed"
-                                
-                                // Wait a moment and check again
-                                Thread.sleep(1000)
-                                val connectionAfterRebind = appService.isServiceConnected()
-                                diagnostics["connectionAfterRebind"] = connectionAfterRebind
-                                
-                                Log.i("TiggPrinter", "Diagnostics: Rebind completed, Connected after rebind=$connectionAfterRebind")
-                                
-                            } catch (rebindException: Exception) {
-                                diagnostics["rebindError"] = rebindException.message ?: "Unknown rebind error"
-                                Log.e("TiggPrinter", "Diagnostics: Rebind failed", rebindException)
-                            }
-                            
-                        } catch (serviceException: Exception) {
-                            diagnostics["serviceError"] = serviceException.message ?: "Unknown service error"
-                            diagnostics["serviceConnected"] = false
-                            Log.e("TiggPrinter", "Diagnostics: Service check failed", serviceException)
-                        }
-                    } else {
-                        diagnostics["serviceConnected"] = false
-                        diagnostics["error"] = "AppService not initialized"
+                // Execute diagnostics in background to avoid blocking main thread
+                Thread {
+                    try {
+                        val diagnostics = mutableMapOf<String, Any>()
                         
-                        // Try to initialize again
-                        try {
-                            Log.i("TiggPrinter", "Diagnostics: Attempting to reinitialize AppService...")
-                            AppService.me().init(context)
-                            AppService.me().setPackageName(context.packageName)
-                            diagnostics["reinitializationAttempted"] = true
-                            
-                            AppService.me().bindService()
-                            diagnostics["postReinitBindResult"] = "Post-reinit bind attempt completed"
-                            
-                        } catch (initException: Exception) {
-                            diagnostics["reinitializationError"] = initException.message ?: "Unknown initialization error"
-                            Log.e("TiggPrinter", "Diagnostics: Reinitialization failed", initException)
+                        // Check if AppService is initialized
+                        val appService = AppService.me()
+                        diagnostics["appServiceInitialized"] = (appService != null)
+                        diagnostics["packageName"] = context.packageName
+                        diagnostics["contextValid"] = this::context.isInitialized
+                        
+                        if (appService != null) {
+                            try {
+                                val isConnected = appService.isServiceConnected()
+                                diagnostics["serviceConnected"] = isConnected
+                                diagnostics["serviceStatus"] = if (isConnected) "Connected" else "Not Connected"
+                                
+                                // Only attempt rebind if explicitly disconnected AND not already in progress
+                                if (!isConnected) {
+                                    Log.i("TiggPrinter", "Diagnostics: Service not connected, checking availability...")
+                                    diagnostics["rebindSkipped"] = "Service disconnected - rebind available on demand"
+                                } else {
+                                    diagnostics["serviceHealthy"] = true
+                                }
+                                
+                            } catch (serviceException: Exception) {
+                                diagnostics["serviceError"] = serviceException.message ?: "Unknown service error"
+                                diagnostics["serviceConnected"] = false
+                                Log.e("TiggPrinter", "Diagnostics: Service check failed", serviceException)
+                            }
+                        } else {
+                            diagnostics["serviceConnected"] = false
+                            diagnostics["error"] = "AppService not initialized"
+                            diagnostics["recommendation"] = "Try manual service binding"
+                        }
+                        
+                        // Return result on main thread
+                        context.mainExecutor.execute {
+                            result.success(diagnostics)
+                        }
+                    } catch (e: Exception) {
+                        Log.e("TiggPrinter", "Failed to get diagnostics", e)
+                        context.mainExecutor.execute {
+                            result.error("DIAGNOSTICS_FAILED", "Failed to get service diagnostics: ${e.message}", null)
                         }
                     }
-                    
-                    result.success(diagnostics)
-                } catch (e: Exception) {
-                    Log.e("TiggPrinter", "Failed to get diagnostics", e)
-                    result.error("DIAGNOSTICS_FAILED", "Failed to get service diagnostics: ${e.message}", null)
-                }
+                }.start()
             }
             "checkSystemServices" -> {
                 try {

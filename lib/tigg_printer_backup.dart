@@ -32,11 +32,11 @@ class TiggPrinter {
       try {
         _lastBindAttempt = DateTime.now();
         await TiggPrinterPlatform.instance.bindService();
-
+        
         // Verify connection after binding
         await Future.delayed(const Duration(milliseconds: 500));
         final isConnected = await isServiceConnected();
-
+        
         if (isConnected) {
           return; // Success
         } else if (attempt < maxRetries) {
@@ -51,7 +51,7 @@ class TiggPrinter {
         await Future.delayed(Duration(seconds: attempt * 2));
       }
     }
-
+    
     throw const TiggPrinterException(
       'BIND_FAILED_AFTER_RETRIES',
       'Failed to bind service after multiple attempts. TiggPrinter service may not be available.',
@@ -107,6 +107,18 @@ class TiggPrinter {
         'Failed to check service status: ${e.toString()}',
       );
     }
+        throw const TiggPrinterException(
+          'SERVICE_NOT_CONNECTED',
+          'Printer service is not connected. Please bind service first using bindService().',
+        );
+      }
+    } catch (e) {
+      if (e is TiggPrinterException) rethrow;
+      throw TiggPrinterException(
+        'SERVICE_CHECK_FAILED',
+        'Failed to check service status: ${e.toString()}',
+      );
+    }
 
     return TiggPrinterPlatform.instance.printText(
       text: text,
@@ -119,22 +131,25 @@ class TiggPrinter {
     return TiggPrinterPlatform.instance.isPrinterAvailable();
   }
 
-  /// Bind to the printer service (legacy method - use bindServiceWithRetry instead)
+  /// Bind the printer service
+  /// This should be called when the app starts or before using printer functions
   static Future<void> bindService() {
     return TiggPrinterPlatform.instance.bindService();
   }
 
-  /// Check if the service is connected
+  /// Check if the printer service is connected
   static Future<bool> isServiceConnected() {
     return TiggPrinterPlatform.instance.isServiceConnected();
   }
 
-  /// Get detailed service diagnostics
+  /// Get detailed service diagnostics for debugging
+  /// This provides detailed information about the service state
   static Future<Map<String, dynamic>> getServiceDiagnostics() {
     return TiggPrinterPlatform.instance.getServiceDiagnostics();
   }
 
-  /// Check system-level printer services
+  /// Check system services and packages related to TiggPrinter
+  /// This helps identify if TiggPrinter services are running on the device
   static Future<Map<String, dynamic>> checkSystemServices() {
     return TiggPrinterPlatform.instance.checkSystemServices();
   }
