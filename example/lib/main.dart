@@ -56,7 +56,7 @@ class _MyAppState extends State<MyApp> {
 
     try {
       await TiggPrinter.bindService();
-      await Future.delayed(const Duration(seconds: 2));
+      await Future.delayed(const Duration(seconds: 1));
       await _checkServiceStatus();
     } on TiggPrinterException catch (e) {
       setState(() {
@@ -65,6 +65,33 @@ class _MyAppState extends State<MyApp> {
     } catch (e) {
       setState(() {
         _printStatus = 'Bind error: $e';
+      });
+    } finally {
+      setState(() {
+        _isPrinting = false;
+      });
+    }
+  }
+
+  Future<void> _bindServiceWithRetry() async {
+    setState(() {
+      _isPrinting = true;
+      _printStatus = 'Smart binding with retry...';
+    });
+
+    try {
+      await TiggPrinter.bindServiceWithRetry(maxRetries: 3);
+      setState(() {
+        _printStatus = 'Service bound successfully with retry logic!';
+      });
+      await _checkServiceStatus();
+    } on TiggPrinterException catch (e) {
+      setState(() {
+        _printStatus = 'Smart bind failed (${e.code}): ${e.message}';
+      });
+    } catch (e) {
+      setState(() {
+        _printStatus = 'Smart bind error: $e';
       });
     } finally {
       setState(() {
@@ -304,6 +331,22 @@ class _MyAppState extends State<MyApp> {
                     child: const Text('Check Status'),
                   ),
                 ],
+              ),
+              const SizedBox(height: 10),
+              // Smart retry button
+              ElevatedButton(
+                onPressed: _isPrinting ? null : _bindServiceWithRetry,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 12,
+                  ),
+                ),
+                child: const Text(
+                  '🔄 Smart Bind with Retry',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
               ),
               const SizedBox(height: 10),
               ElevatedButton(
