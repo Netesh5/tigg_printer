@@ -91,9 +91,14 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
 
                 try {
-                    // Check if service is available
+                    // Check if service is available and connected
                     if (AppService.me() == null) {
                         result.error("SERVICE_UNAVAILABLE", "Printer service is not initialized", null)
+                        return
+                    }
+                    
+                    if (!AppService.me().isServiceConnected()) {
+                        result.error("SERVICE_NOT_CONNECTED", "Printer service is not connected. Please bind service first.", null)
                         return
                     }
 
@@ -146,9 +151,14 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
 
                 try {
-                    // Check if service is available
+                    // Check if service is available and connected
                     if (AppService.me() == null) {
                         result.error("SERVICE_UNAVAILABLE", "Printer service is not initialized", null)
+                        return
+                    }
+                    
+                    if (!AppService.me().isServiceConnected()) {
+                        result.error("SERVICE_NOT_CONNECTED", "Printer service is not connected. Please bind service first.", null)
                         return
                     }
 

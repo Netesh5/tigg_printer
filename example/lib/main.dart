@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 
 import 'package:flutter/services.dart';
+import 'package:tigg_printer/core/exception/custom_exception.dart';
 import 'package:tigg_printer/tigg_printer.dart';
 
 void main() {
@@ -18,9 +19,58 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> {
   String _printStatus = 'Ready to print';
   bool _isPrinting = false;
+  bool _isServiceConnected = false;
 
   final String _exampleBase64Image =
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+
+  @override
+  void initState() {
+    super.initState();
+    _checkServiceStatus();
+  }
+
+  Future<void> _checkServiceStatus() async {
+    try {
+      final isConnected = await TiggPrinter.isServiceConnected();
+      setState(() {
+        _isServiceConnected = isConnected;
+        _printStatus = isConnected
+            ? 'Service connected ✓'
+            : 'Service not connected. Please bind service.';
+      });
+    } catch (e) {
+      setState(() {
+        _isServiceConnected = false;
+        _printStatus = 'Service check failed: $e';
+      });
+    }
+  }
+
+  Future<void> _bindService() async {
+    setState(() {
+      _isPrinting = true;
+      _printStatus = 'Binding service...';
+    });
+
+    try {
+      await TiggPrinter.bindService();
+      await Future.delayed(const Duration(seconds: 2));
+      await _checkServiceStatus();
+    } on TiggPrinterException catch (e) {
+      setState(() {
+        _printStatus = 'Bind failed (${e.code}): ${e.message}';
+      });
+    } catch (e) {
+      setState(() {
+        _printStatus = 'Bind error: $e';
+      });
+    } finally {
+      setState(() {
+        _isPrinting = false;
+      });
+    }
+  }
 
   Future<void> _printImage() async {
     setState(() {
@@ -129,6 +179,56 @@ class _MyAppState extends State<MyApp> {
                 'Status: $_printStatus',
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 18),
+              ),
+              const SizedBox(height: 10),
+              // Service connection indicator
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: _isServiceConnected
+                      ? Colors.green.shade100
+                      : Colors.red.shade100,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: _isServiceConnected ? Colors.green : Colors.red,
+                    width: 1,
+                  ),
+                ),
+                child: Text(
+                  _isServiceConnected
+                      ? 'Service Connected ✓'
+                      : 'Service Disconnected ✗',
+                  style: TextStyle(
+                    color: _isServiceConnected
+                        ? Colors.green.shade800
+                        : Colors.red.shade800,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              // Service management buttons
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  ElevatedButton(
+                    onPressed: _isPrinting ? null : _bindService,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue,
+                    ),
+                    child: const Text('Bind Service'),
+                  ),
+                  ElevatedButton(
+                    onPressed: _isPrinting ? null : _checkServiceStatus,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange,
+                    ),
+                    child: const Text('Check Status'),
+                  ),
+                ],
               ),
               const SizedBox(height: 20),
               ElevatedButton(
