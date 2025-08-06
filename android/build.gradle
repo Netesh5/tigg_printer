@@ -6,11 +6,15 @@ buildscript {
     repositories {
         google()
         mavenCentral()
+         flatDir {
+            dirs 'libs' 
+        }
     }
 
     dependencies {
         classpath("com.android.tools.build:gradle:8.7.3")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version")
+        implementation(name: 'printer_sdk', ext: 'aar')
     }
 }
 
@@ -50,7 +54,6 @@ android {
     dependencies {
         testImplementation("org.jetbrains.kotlin:kotlin-test")
         testImplementation("org.mockito:mockito-core:5.0.0")
-        implementation files('libs/printer_sdk.jar')
     }
 
     testOptions {
