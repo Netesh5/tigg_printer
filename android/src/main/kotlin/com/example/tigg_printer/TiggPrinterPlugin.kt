@@ -210,75 +210,155 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     result.error("PRINT_EXCEPTION", "Unexpected error during printing: ${e.message}", null)
                 }
             }
-            "printText" -> {
-                val text = call.argument<String>("text")
-                val textSize = call.argument<Int>("textSize") ?: 24
-                val paperWidth = call.argument<Int>("paperWidth") ?: 384 // Default to 58mm paper
+            // "printText" -> {
+            //     val text = call.argument<String>("text")
+            //     val textSize = call.argument<Int>("textSize") ?: 24
+            //     val paperWidth = call.argument<Int>("paperWidth") ?: 384 // Default to 58mm paper
 
-                if (text.isNullOrEmpty()) {
-                    result.error("INVALID_INPUT", "Text is required", null)
-                    return
-                }
+            //     if (text.isNullOrEmpty()) {
+            //         result.error("INVALID_INPUT", "Text is required", null)
+            //         return
+            //     }
 
-                if (textSize <= 0 || textSize > 100) {
-                    result.error("INVALID_INPUT", "Text size must be between 1 and 100", null)
-                    return
-                }
+            //     if (textSize <= 0 || textSize > 100) {
+            //         result.error("INVALID_INPUT", "Text size must be between 1 and 100", null)
+            //         return
+            //     }
 
-                if (paperWidth <= 0 || paperWidth > 1000) {
-                    result.error("INVALID_INPUT", "Paper width must be between 1 and 1000 pixels", null)
-                    return
-                }
+            //     if (paperWidth <= 0 || paperWidth > 1000) {
+            //         result.error("INVALID_INPUT", "Paper width must be between 1 and 1000 pixels", null)
+            //         return
+            //     }
 
-                try {
-                    // Check if service is available and connected
-                    if (AppService.me() == null) {
-                        result.error("SERVICE_UNAVAILABLE", "Printer service is not initialized", null)
-                        return
-                    }
+            //     try {
+            //         // Check if service is available and connected
+            //         if (AppService.me() == null) {
+            //             result.error("SERVICE_UNAVAILABLE", "Printer service is not initialized", null)
+            //             return
+            //         }
                     
-                    if (!AppService.me().isServiceConnected()) {
-                        result.error("SERVICE_NOT_CONNECTED", "Printer service is not connected. Please bind service first.", null)
-                        return
-                    }
+            //         if (!AppService.me().isServiceConnected()) {
+            //             result.error("SERVICE_NOT_CONNECTED", "Printer service is not connected. Please bind service first.", null)
+            //             return
+            //         }
 
-                    // Create a simple bitmap with text instead of using startPrinting with text
-                    // This avoids the base64 validation issue
-                    val bitmap = createTextBitmap(text, textSize, paperWidth)
+            //         // Use bitmap method directly with header flag set to false
+            //         Log.d("TiggPrinter", "Creating text bitmap for printing...")
+            //         val bitmap = createTextBitmap(text, textSize, paperWidth)
                     
-                    if (bitmap == null) {
-                        result.error("TEXT_RENDER_ERROR", "Could not create text bitmap", null)
-                        return
-                    }
+            //         if (bitmap == null) {
+            //             result.error("TEXT_RENDER_ERROR", "Could not create text bitmap", null)
+            //             return
+            //         }
 
-                    // Use the bitmap printing method which works
-                    AppService.me().startPrinting(bitmap, true, object : IPaymentCallback.Stub() {
-                        override fun onSuccess(success: Boolean, message: String?) {
-                            // Ensure callback runs on main thread
-                            context.mainExecutor.execute {
-                                if (success) {
-                                    result.success(mapOf(
-                                        "success" to true,
-                                        "message" to "Text printed successfully"
-                                    ))
-                                } else {
-                                    result.error("PRINT_FAILED", message ?: "Print operation failed", null)
-                                }
-                            }
-                        }
+            //         // Use bitmap printing with boolean false (no header)
+            //         Log.d("TiggPrinter", "Printing text as bitmap with no header...")
+                    
+            //         AppService.me().startPrinting(bitmap, false, object : IPaymentCallback.Stub() {
+            //             override fun onSuccess(success: Boolean, message: String?) {
+            //                 Log.d("TiggPrinter", "Print callback - onSuccess: success=$success, message=$message")
+            //                 context.mainExecutor.execute {
+            //                     if (success) {
+            //                         result.success(mapOf(
+            //                             "success" to true,
+            //                             "message" to "Invoice printed successfully"
+            //                         ))
+            //                     } else {
+            //                         result.error("PRINT_FAILED", message ?: "Print operation failed", null)
+            //                     }
+            //                 }
+            //             }
                         
-                        override fun onResponse(response: Bundle?) {
-                            Log.d("TiggPrinter", "Print response received: $response")
-                        }
-                    })
-                } catch (e: RemoteException) {
-                    result.error("REMOTE_EXCEPTION", "Printer service communication error: ${e.message}", null)
-                } catch (e: IllegalArgumentException) {
-                    result.error("INVALID_INPUT", "Invalid input parameters: ${e.message}", null)
-                } catch (e: Exception) {
-                    result.error("PRINT_EXCEPTION", "Unexpected error during printing: ${e.message}", null)
+            //             override fun onResponse(response: Bundle?) {
+            //                 Log.d("TiggPrinter", "Print callback - onResponse: $response")
+            //                 // onResponse is for additional data, onSuccess handles the completion
+            //             }
+            //         })
+
+            //     } catch (e: RemoteException) {
+            //         result.error("REMOTE_EXCEPTION", "Printer service communication error: ${e.message}", null)
+            //     } catch (e: IllegalArgumentException) {
+            //         result.error("INVALID_INPUT", "Invalid input parameters: ${e.message}", null)
+            //     } catch (e: Exception) {
+            //         result.error("PRINT_EXCEPTION", "Unexpected error during printing: ${e.message}", null)
+            //     }
+            // }
+            "printText" -> {
+    val text = call.argument<String>("text")
+    val textSize = call.argument<Int>("textSize") ?: 24
+    val paperWidth = call.argument<Int>("paperWidth") ?: 384 // Default to 58mm paper
+
+    if (text.isNullOrEmpty()) {
+        result.error("INVALID_INPUT", "Text is required", null)
+        return
+    }
+
+    if (textSize <= 0 || textSize > 100) {
+        result.error("INVALID_INPUT", "Text size must be between 1 and 100", null)
+        return
+    }
+
+    if (paperWidth <= 0 || paperWidth > 1000) {
+        result.error("INVALID_INPUT", "Paper width must be between 1 and 1000 pixels", null)
+        return
+    }
+
+    try {
+        if (AppService.me() == null) {
+            result.error("SERVICE_UNAVAILABLE", "Printer service is not initialized", null)
+            return
+        }
+
+        // Attempt re-bind if not connected
+        if (!AppService.me().isServiceConnected()) {
+            Log.w("TiggPrinter", "Service not connected. Attempting re-bind before printing...")
+            AppService.me().bindService()
+            Thread.sleep(1000) // Wait for binding
+        }
+
+        if (!AppService.me().isServiceConnected()) {
+            result.error("SERVICE_NOT_CONNECTED", "Printer service is still not connected after retry", null)
+            return
+        }
+
+        val bitmap = createTextBitmap(text, textSize, paperWidth)
+        if (bitmap == null) {
+            result.error("TEXT_RENDER_ERROR", "Could not create text bitmap", null)
+            return
+        }
+
+        Log.d("TiggPrinter", "Starting print job...")
+
+        AppService.me().startPrinting(bitmap, false, object : IPaymentCallback.Stub() {
+            override fun onSuccess(success: Boolean, message: String?) {
+                Log.d("TiggPrinter", "Print callback - onSuccess: success=$success, message=$message")
+                context.mainExecutor.execute {
+                    if (success) {
+                        val response = mapOf<String, Any?>(
+                            "success" to true,
+                            "message" to (message ?: "Printed successfully")
+                        )
+                        result.success(response)
+                    } else {
+                        result.error("PRINT_FAILED", message ?: "Print operation failed", null)
+                    }
                 }
             }
+
+            override fun onResponse(response: Bundle?) {
+                Log.d("TiggPrinter", "Print callback - onResponse: $response")
+            }
+        })
+
+    } catch (e: RemoteException) {
+        result.error("REMOTE_EXCEPTION", "Printer service communication error: ${e.message}", null)
+    } catch (e: IllegalArgumentException) {
+        result.error("INVALID_INPUT", "Invalid input parameters: ${e.message}", null)
+    } catch (e: Exception) {
+        result.error("PRINT_EXCEPTION", "Unexpected error during printing: ${e.message}", null)
+    }
+}
+
             else -> result.notImplemented()
         }
     }
@@ -289,11 +369,9 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     private fun createTextBitmap(text: String, textSize: Int, paperWidth: Int): Bitmap? {
         return try {
-            // Use the provided paper width instead of hardcoded values
-            // Common thermal printer widths:
             // 58mm paper: ~384 pixels, 80mm paper: ~576 pixels
-            val padding = 2 // Increased padding for better spacing
-            val usableWidth = paperWidth - (padding * 2) // Account for padding on both sides
+            val padding = 8 // Better padding for balanced left/right spacing
+            val usableWidth = paperWidth - (padding * 2) 
             
             // Create paint object for text
             val paint = Paint().apply {
@@ -337,7 +415,8 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
             
             val lineHeight = paint.textSize + 8 // Increase line spacing
-            val totalHeight = (lines.size * lineHeight + padding * 2).toInt()
+            val bottomFeedSpace = 150 // Add extra space at bottom for paper feed effect
+            val totalHeight = (lines.size * lineHeight + padding * 2 + bottomFeedSpace).toInt()
             
             // Create bitmap with proper dimensions
             val bitmap = Bitmap.createBitmap(

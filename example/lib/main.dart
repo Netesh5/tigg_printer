@@ -234,22 +234,13 @@ class _MyAppState extends State<MyApp> {
       print('Starting text print operation...');
 
       // Try using a more comprehensive test text
-      final result =
-          await TiggPrinter.printText(
-            text:
-                'Hello World!\nThis is a test print with multiple lines.\n\nTesting word wrapping with a very long sentence that should wrap to multiple lines automatically.',
-            textSize: _textSize.round(),
-            paperWidth: _paperWidth,
-          ).timeout(
-            const Duration(seconds: 30),
-            onTimeout: () {
-              print('Text print operation timed out');
-              throw TimeoutException(
-                'Print operation timed out after 30 seconds',
-              );
-            },
-          );
-      print('Text print result: $result');
+      final result = await TiggPrinter.printText(
+        text:
+            'Hello World!\nThis is a test print with multiple lines.\n\nTesting word wrapping with a very long sentence that should wrap to multiple lines automatically.',
+        textSize: _textSize.round(),
+        paperWidth: _paperWidth,
+      );
+      print('Text print result: ${result.success}');
       setState(() {
         _printStatus = 'Success: ${result.message}';
       });
