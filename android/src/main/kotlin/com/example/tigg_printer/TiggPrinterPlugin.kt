@@ -36,7 +36,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             try {
                 Log.i("TiggPrinter", "Initializing AppService in background...")
                 AppService.me().init(context)
-                AppService.me().setPackageName(context.packageName)
+                AppService.me().setPackageName("com.fewapay.cplus")
                 
                 
                 Log.i("TiggPrinter", "Attempting initial service bind...")
