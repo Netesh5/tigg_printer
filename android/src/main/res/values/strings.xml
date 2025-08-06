@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Printer related strings that might be needed by the SDK -->
+    <string name="printer_ready">Printer is ready</string>
+    <string name="printer_not_ready">Printer is not ready</string>
+    <string name="printing">Printing...</string>
+    <string name="print_success">Print successful</string>
+    <string name="print_failed">Print failed</string>
+    <string name="printer_error">Printer error</string>
+    <string name="printer_offline">Printer is offline</string>
+    <string name="printer_paper_empty">Printer paper is empty</string>
+    <string name="printer_low_battery">Printer battery is low</string>
+    <string name="printer_overheated">Printer is overheated</string>
+    <string name="connecting_printer">Connecting to printer...</string>
+    <string name="printer_connected">Printer connected</string>
+    <string name="printer_disconnected">Printer disconnected</string>
+    <string name="service_binding">Binding service...</string>
+    <string name="service_bound">Service bound successfully</string>
+    <string name="service_bind_failed">Failed to bind service</string>
+    <string name="initializing">Initializing...</string>
+    <string name="please_wait">Please wait...</string>
+</resources>
