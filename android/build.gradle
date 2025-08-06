@@ -6,27 +6,36 @@ buildscript {
     repositories {
         google()
         mavenCentral()
-         flatDir {
-            dirs 'libs' 
-        }
     }
 
     dependencies {
         classpath("com.android.tools.build:gradle:8.7.3")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version")
-        implementation(name: 'printer_sdk', ext: 'aar')
-    }
-}
-
-allprojects {
-    repositories {
-        google()
-        mavenCentral()
     }
 }
 
 apply plugin: "com.android.library"
 apply plugin: "kotlin-android"
+
+rootProject.allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        flatDir {
+            dirs 'libs'
+            dirs project(":tigg_printer").files('libs')
+        }
+    }
+}
+
+// repositories {
+//     google()
+//     mavenCentral()
+//     flatDir {
+//         dirs 'libs'
+//         dirs project(":tigg_printer").files('libs')
+//     }
+// }
 
 android {
     namespace = "com.example.tigg_printer"
@@ -51,20 +60,28 @@ android {
         minSdk = 24
     }
 
-    dependencies {
-        testImplementation("org.jetbrains.kotlin:kotlin-test")
-        testImplementation("org.mockito:mockito-core:5.0.0")
+    packagingOptions {
+        pickFirst '**/*.so'
     }
 
     testOptions {
         unitTests.all {
             useJUnitPlatform()
-
             testLogging {
-               events "passed", "skipped", "failed", "standardOut", "standardError"
-               outputs.upToDateWhen {false}
-               showStandardStreams = true
+                events "passed", "skipped", "failed", "standardOut", "standardError"
+                outputs.upToDateWhen { false }
+                showStandardStreams = true
             }
         }
     }
+    buildFeatures {
+        viewBinding true
+    }
+}
+
+dependencies {
+    implementation (name: 'printer_sdk', ext: 'aar')
+    implementation 'androidx.core:core-ktx:1.12.0'
+    testImplementation("org.jetbrains.kotlin:kotlin-test")
+    testImplementation("org.mockito:mockito-core:5.0.0")
 }
