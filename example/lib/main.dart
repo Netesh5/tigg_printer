@@ -272,6 +272,79 @@ class _MyAppState extends State<MyApp> {
     }
   }
 
+  Future<void> _printRawBytes() async {
+    setState(() {
+      _isPrinting = true;
+      _printStatus = 'Printing raw ESC/POS bytes...';
+    });
+
+    try {
+      // Example ESC/POS command bytes (you would get these from esc_pos_utils_plus)
+      final List<int> escPosBytes = [
+        0x1B, 0x40, // ESC @ - Initialize printer
+        0x1B, 0x61, 0x01, // ESC a 1 - Center align
+        0x1D, 0x21, 0x11, // GS ! 17 - Double height and width
+        // Text: "ESC/POS Test"
+        0x45, 0x53, 0x43, 0x2F, 0x50, 0x4F, 0x53, 0x20, 0x54, 0x65, 0x73, 0x74,
+        0x0A, 0x0A, // Line feeds
+        0x1B, 0x61, 0x00, // ESC a 0 - Left align
+        0x1D, 0x21, 0x00, // GS ! 0 - Normal size
+        // Text: "This is printed using raw bytes!"
+        0x54,
+        0x68,
+        0x69,
+        0x73,
+        0x20,
+        0x69,
+        0x73,
+        0x20,
+        0x70,
+        0x72,
+        0x69,
+        0x6E,
+        0x74,
+        0x65,
+        0x64,
+        0x20,
+        0x75,
+        0x73,
+        0x69,
+        0x6E,
+        0x67,
+        0x20,
+        0x72,
+        0x61,
+        0x77,
+        0x20,
+        0x62,
+        0x79,
+        0x74,
+        0x65,
+        0x73,
+        0x21,
+        0x0A, 0x0A, 0x0A, // Line feeds for spacing
+        0x1D, 0x56, 0x42, 0x00, // GS V B 0 - Cut paper (partial)
+      ];
+
+      final result = await TiggPrinter.printRawBytes(bytes: escPosBytes);
+      setState(() {
+        _printStatus = 'Success: ${result.message}';
+      });
+    } on TiggPrinterException catch (e) {
+      setState(() {
+        _printStatus = 'Printer Error (${e.code}): ${e.message}';
+      });
+    } catch (e) {
+      setState(() {
+        _printStatus = 'Raw bytes error: $e';
+      });
+    } finally {
+      setState(() {
+        _isPrinting = false;
+      });
+    }
+  }
+
   Future<void> _checkPrinterAvailability() async {
     setState(() {
       _isPrinting = true;
@@ -579,9 +652,25 @@ class _MyAppState extends State<MyApp> {
                         },
                   child: const Text('Print Test Text'),
                 ),
+                const SizedBox(height: 10),
+                ElevatedButton(
+                  onPressed: _isPrinting
+                      ? null
+                      : () {
+                          print('Print Raw Bytes button tapped');
+                          _printRawBytes();
+                        },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.purple,
+                  ),
+                  child: const Text(
+                    'Print ESC/POS Raw Bytes',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                ),
                 const SizedBox(height: 20),
                 const Text(
-                  'This will print a test image or text using the Tigg Printer',
+                  'This will print test content using the Tigg Printer:\n• Test Image: Base64 encoded image\n• Test Text: Formatted text with word wrapping\n• ESC/POS Raw Bytes: Direct printer commands (compatible with esc_pos_utils_plus)',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 14, color: Colors.grey),
                 ),
