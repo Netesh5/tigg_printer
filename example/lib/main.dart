@@ -21,9 +21,11 @@ class _MyAppState extends State<MyApp> {
   String _printStatus = 'Ready to print';
   bool _isPrinting = false;
   bool _isServiceConnected = false;
+  double _textSize = 24.0;
+  int _paperWidth = 384; // Default to 58mm paper (384px)
 
   final String _exampleBase64Image =
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+      '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=';
 
   @override
   void initState() {
@@ -181,12 +183,25 @@ class _MyAppState extends State<MyApp> {
     });
 
     try {
-      final result = await TiggPrinter.printBase64Image(
-        base64Image: _exampleBase64Image,
-        textSize: 24,
-      );
+      // Add timeout to prevent hanging
+      final result =
+          await TiggPrinter.printBase64Image(
+            base64Image: _exampleBase64Image,
+            textSize: _textSize.round(),
+          ).timeout(
+            const Duration(seconds: 30),
+            onTimeout: () {
+              throw TimeoutException(
+                'Print operation timed out after 30 seconds',
+              );
+            },
+          );
       setState(() {
         _printStatus = 'Success: ${result.message}';
+      });
+    } on TimeoutException catch (e) {
+      setState(() {
+        _printStatus = 'Timeout Error: ${e.message}';
       });
     } on TiggPrinterException catch (e) {
       setState(() {
@@ -208,32 +223,58 @@ class _MyAppState extends State<MyApp> {
   }
 
   Future<void> _printText() async {
+    print('_printText called - isPrinting: $_isPrinting');
+
     setState(() {
       _isPrinting = true;
       _printStatus = 'Printing text...';
     });
 
     try {
-      final result = await TiggPrinter.printText(
-        text: 'Hello from Tigg Printer!\nThis is a test print.',
-        textSize: 24,
-      );
+      print('Starting text print operation...');
+
+      // Try using a more comprehensive test text
+      final result =
+          await TiggPrinter.printText(
+            text:
+                'Hello World!\nThis is a test print with multiple lines.\n\nTesting word wrapping with a very long sentence that should wrap to multiple lines automatically.',
+            textSize: _textSize.round(),
+            paperWidth: _paperWidth,
+          ).timeout(
+            const Duration(seconds: 30),
+            onTimeout: () {
+              print('Text print operation timed out');
+              throw TimeoutException(
+                'Print operation timed out after 30 seconds',
+              );
+            },
+          );
+      print('Text print result: $result');
       setState(() {
         _printStatus = 'Success: ${result.message}';
       });
+    } on TimeoutException catch (e) {
+      print('TimeoutException: ${e.message}');
+      setState(() {
+        _printStatus = 'Timeout Error: ${e.message}';
+      });
     } on TiggPrinterException catch (e) {
+      print('TiggPrinterException: (${e.code}) ${e.message}');
       setState(() {
         _printStatus = 'Printer Error (${e.code}): ${e.message}';
       });
     } on PlatformException catch (e) {
+      print('PlatformException: ${e.message}');
       setState(() {
         _printStatus = 'Platform Error: ${e.message}';
       });
     } catch (e) {
+      print('Unexpected error: $e');
       setState(() {
         _printStatus = 'Unexpected error: $e';
       });
     } finally {
+      print('Text print operation finished, setting isPrinting to false');
       setState(() {
         _isPrinting = false;
       });
@@ -268,134 +309,293 @@ class _MyAppState extends State<MyApp> {
     }
   }
 
+  void _resetState() {
+    setState(() {
+      _isPrinting = false;
+      _printStatus = 'Ready to print';
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       home: Scaffold(
         appBar: AppBar(title: const Text('Tigg Printer Example')),
         body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                'Status: $_printStatus',
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 18),
-              ),
-              const SizedBox(height: 10),
-              // Service connection indicator
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  'Status: $_printStatus',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 18),
                 ),
-                decoration: BoxDecoration(
-                  color: _isServiceConnected
-                      ? Colors.green.shade100
-                      : Colors.red.shade100,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: _isServiceConnected ? Colors.green : Colors.red,
-                    width: 1,
-                  ),
-                ),
-                child: Text(
-                  _isServiceConnected
-                      ? 'Service Connected ✓'
-                      : 'Service Disconnected ✗',
-                  style: TextStyle(
-                    color: _isServiceConnected
-                        ? Colors.green.shade800
-                        : Colors.red.shade800,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              // Service management buttons
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  ElevatedButton(
-                    onPressed: _isPrinting ? null : _bindService,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blue,
-                    ),
-                    child: const Text('Bind Service'),
-                  ),
-                  ElevatedButton(
-                    onPressed: _isPrinting ? null : _checkServiceStatus,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.orange,
-                    ),
-                    child: const Text('Check Status'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              // Smart retry button
-              ElevatedButton(
-                onPressed: _isPrinting ? null : _bindServiceWithRetry,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
+                const SizedBox(height: 10),
+                // Service connection indicator
+                Container(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _isServiceConnected
+                        ? Colors.green.shade100
+                        : Colors.red.shade100,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: _isServiceConnected ? Colors.green : Colors.red,
+                      width: 1,
+                    ),
+                  ),
+                  child: Text(
+                    _isServiceConnected
+                        ? 'Service Connected ✓'
+                        : 'Service Disconnected ✗',
+                    style: TextStyle(
+                      color: _isServiceConnected
+                          ? Colors.green.shade800
+                          : Colors.red.shade800,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
-                child: const Text(
-                  '🔄 Smart Bind with Retry',
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                const SizedBox(height: 20),
+                // Service management buttons
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    ElevatedButton(
+                      onPressed: _isPrinting ? null : _bindService,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                      ),
+                      child: const Text('Bind Service'),
+                    ),
+                    ElevatedButton(
+                      onPressed: _isPrinting ? null : _checkServiceStatus,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange,
+                      ),
+                      child: const Text('Check Status'),
+                    ),
+                  ],
                 ),
-              ),
-              const SizedBox(height: 10),
-              // ElevatedButton(
-              //   onPressed: _isPrinting ? null : _getDiagnostics,
-              //   style: ElevatedButton.styleFrom(backgroundColor: Colors.purple),
-              //   child: const Text('Get Diagnostics'),
-              // ),
-              // const SizedBox(height: 10),
-              // ElevatedButton(
-              //   onPressed: _isPrinting ? null : _checkSystemServices,
-              //   style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
-              //   child: const Text('Check System Services'),
-              // ),
-              // const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: _isPrinting ? null : _checkPrinterAvailability,
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                child: const Text('Check Printer Availability'),
-              ),
-              const SizedBox(height: 10),
-              ElevatedButton(
-                onPressed: _isPrinting ? null : _printImage,
-                child: _isPrinting
-                    ? const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                const SizedBox(height: 10),
+                // Smart retry button
+                ElevatedButton(
+                  onPressed: _isPrinting ? null : _bindServiceWithRetry,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
+                  ),
+                  child: const Text(
+                    '🔄 Smart Bind with Retry',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                // Show reset button when printing is stuck
+                if (_isPrinting)
+                  ElevatedButton(
+                    onPressed: _resetState,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                    ),
+                    child: const Text(
+                      'Cancel/Reset',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                ElevatedButton(
+                  onPressed: _isPrinting ? null : _checkPrinterAvailability,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                  ),
+                  child: const Text('Check Printer Availability'),
+                ),
+                const SizedBox(height: 20),
+                // Text Size Control
+                Card(
+                  margin: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Text Size: ${_textSize.round()}px',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
                           ),
-                          SizedBox(width: 10),
-                          Text('Printing...'),
-                        ],
-                      )
-                    : const Text('Print Test Image'),
-              ),
-              const SizedBox(height: 10),
-              ElevatedButton(
-                onPressed: _isPrinting ? null : _printText,
-                child: const Text('Print Test Text'),
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'This will print a test image or text using the Tigg Printer',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 14, color: Colors.grey),
-              ),
-            ],
+                        ),
+                        Slider(
+                          value: _textSize,
+                          min: 12.0,
+                          max: 48.0,
+                          divisions: 36,
+                          onChanged: (value) {
+                            setState(() {
+                              _textSize = value;
+                            });
+                          },
+                        ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            TextButton(
+                              onPressed: () => setState(() => _textSize = 12.0),
+                              child: const Text('Small (12px)'),
+                            ),
+                            TextButton(
+                              onPressed: () => setState(() => _textSize = 24.0),
+                              child: const Text('Medium (24px)'),
+                            ),
+                            TextButton(
+                              onPressed: () => setState(() => _textSize = 36.0),
+                              child: const Text('Large (36px)'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                // Paper Width Control
+                Card(
+                  margin: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Paper Width: ${_paperWidth}px',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            ElevatedButton(
+                              onPressed: () =>
+                                  setState(() => _paperWidth = 384),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: _paperWidth == 384
+                                    ? Colors.blue
+                                    : Colors.grey.shade300,
+                              ),
+                              child: Text(
+                                '58mm\n(384px)',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: _paperWidth == 384
+                                      ? Colors.white
+                                      : Colors.black,
+                                ),
+                              ),
+                            ),
+                            ElevatedButton(
+                              onPressed: () =>
+                                  setState(() => _paperWidth = 576),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: _paperWidth == 576
+                                    ? Colors.blue
+                                    : Colors.grey.shade300,
+                              ),
+                              child: Text(
+                                '80mm\n(576px)',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: _paperWidth == 576
+                                      ? Colors.white
+                                      : Colors.black,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            const Text('Custom: '),
+                            Expanded(
+                              child: TextFormField(
+                                initialValue: _paperWidth.toString(),
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(
+                                  hintText: 'Width in pixels',
+                                  border: OutlineInputBorder(),
+                                  contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                ),
+                                onChanged: (value) {
+                                  final width = int.tryParse(value);
+                                  if (width != null &&
+                                      width > 0 &&
+                                      width <= 1000) {
+                                    setState(() {
+                                      _paperWidth = width;
+                                    });
+                                  }
+                                },
+                              ),
+                            ),
+                            const Text(' px'),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                ElevatedButton(
+                  onPressed: _isPrinting ? null : _printImage,
+                  child: _isPrinting
+                      ? const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                            SizedBox(width: 10),
+                            Text('Printing...'),
+                          ],
+                        )
+                      : const Text('Print Test Image'),
+                ),
+                const SizedBox(height: 10),
+                ElevatedButton(
+                  onPressed: _isPrinting
+                      ? null
+                      : () {
+                          print('Print Text button tapped');
+                          _printText();
+                        },
+                  child: const Text('Print Test Text'),
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  'This will print a test image or text using the Tigg Printer',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 14, color: Colors.grey),
+                ),
+              ],
+            ),
           ),
         ),
       ),

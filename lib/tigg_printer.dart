@@ -90,6 +90,7 @@ class TiggPrinter {
   static Future<PrintResult> printText({
     required String text,
     int textSize = 24,
+    int paperWidth = 384,
   }) async {
     // Check service connection before printing
     try {
@@ -111,6 +112,7 @@ class TiggPrinter {
     return TiggPrinterPlatform.instance.printText(
       text: text,
       textSize: textSize,
+      paperWidth: paperWidth,
     );
   }
 

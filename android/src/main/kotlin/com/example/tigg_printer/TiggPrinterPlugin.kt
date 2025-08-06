@@ -5,6 +5,10 @@ package com.example.tigg_printer
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Typeface
 import android.os.Bundle
 import android.os.RemoteException
 import android.util.Base64
@@ -178,10 +182,16 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     // Use the startPrinting method from AppService for bitmap printing
                     AppService.me().startPrinting(bitmap, true, object : IPaymentCallback.Stub() {
                         override fun onSuccess(success: Boolean, message: String?) {
-                            if (success) {
-                                result.success("Image printed successfully")
-                            } else {
-                                result.error("PRINT_FAILED", message ?: "Print operation failed", null)
+                            // Ensure callback runs on main thread
+                            context.mainExecutor.execute {
+                                if (success) {
+                                    result.success(mapOf(
+                                        "success" to true,
+                                        "message" to "Image printed successfully"
+                                    ))
+                                } else {
+                                    result.error("PRINT_FAILED", message ?: "Print operation failed", null)
+                                }
                             }
                         }
                         
@@ -203,6 +213,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             "printText" -> {
                 val text = call.argument<String>("text")
                 val textSize = call.argument<Int>("textSize") ?: 24
+                val paperWidth = call.argument<Int>("paperWidth") ?: 384 // Default to 58mm paper
 
                 if (text.isNullOrEmpty()) {
                     result.error("INVALID_INPUT", "Text is required", null)
@@ -211,6 +222,11 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
                 if (textSize <= 0 || textSize > 100) {
                     result.error("INVALID_INPUT", "Text size must be between 1 and 100", null)
+                    return
+                }
+
+                if (paperWidth <= 0 || paperWidth > 1000) {
+                    result.error("INVALID_INPUT", "Paper width must be between 1 and 1000 pixels", null)
                     return
                 }
 
@@ -226,13 +242,28 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                         return
                     }
 
-                    // Use the startPrinting method from AppService for text printing
-                    AppService.me().startPrinting(text, textSize, object : IPaymentCallback.Stub() {
+                    // Create a simple bitmap with text instead of using startPrinting with text
+                    // This avoids the base64 validation issue
+                    val bitmap = createTextBitmap(text, textSize, paperWidth)
+                    
+                    if (bitmap == null) {
+                        result.error("TEXT_RENDER_ERROR", "Could not create text bitmap", null)
+                        return
+                    }
+
+                    // Use the bitmap printing method which works
+                    AppService.me().startPrinting(bitmap, true, object : IPaymentCallback.Stub() {
                         override fun onSuccess(success: Boolean, message: String?) {
-                            if (success) {
-                                result.success("Text printed successfully")
-                            } else {
-                                result.error("PRINT_FAILED", message ?: "Print operation failed", null)
+                            // Ensure callback runs on main thread
+                            context.mainExecutor.execute {
+                                if (success) {
+                                    result.success(mapOf(
+                                        "success" to true,
+                                        "message" to "Text printed successfully"
+                                    ))
+                                } else {
+                                    result.error("PRINT_FAILED", message ?: "Print operation failed", null)
+                                }
                             }
                         }
                         
@@ -254,5 +285,83 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
+    }
+
+    private fun createTextBitmap(text: String, textSize: Int, paperWidth: Int): Bitmap? {
+        return try {
+            // Use the provided paper width instead of hardcoded values
+            // Common thermal printer widths:
+            // 58mm paper: ~384 pixels, 80mm paper: ~576 pixels
+            val padding = 2 // Increased padding for better spacing
+            val usableWidth = paperWidth - (padding * 2) // Account for padding on both sides
+            
+            // Create paint object for text
+            val paint = Paint().apply {
+                color = Color.BLACK
+                this.textSize = textSize.toFloat()
+                typeface = Typeface.DEFAULT
+                isAntiAlias = true
+                textAlign = Paint.Align.LEFT // Use left align but position correctly
+            }
+
+            // Split text into lines and handle word wrapping
+            val lines = mutableListOf<String>()
+            text.split("\n").forEach { paragraph ->
+                if (paragraph.isEmpty()) {
+                    lines.add("")
+                } else {
+                    // Word wrap long lines
+                    val words = paragraph.split(" ")
+                    var currentLine = ""
+                    
+                    for (word in words) {
+                        val testLine = if (currentLine.isEmpty()) word else "$currentLine $word"
+                        val testWidth = paint.measureText(testLine)
+                        
+                        if (testWidth <= usableWidth) {
+                            currentLine = testLine
+                        } else {
+                            if (currentLine.isNotEmpty()) {
+                                lines.add(currentLine)
+                                currentLine = word
+                            } else {
+                                // Single word is too long, add it anyway
+                                lines.add(word)
+                            }
+                        }
+                    }
+                    if (currentLine.isNotEmpty()) {
+                        lines.add(currentLine)
+                    }
+                }
+            }
+            
+            val lineHeight = paint.textSize + 8 // Increase line spacing
+            val totalHeight = (lines.size * lineHeight + padding * 2).toInt()
+            
+            // Create bitmap with proper dimensions
+            val bitmap = Bitmap.createBitmap(
+                paperWidth,
+                totalHeight,
+                Bitmap.Config.ARGB_8888
+            )
+            val canvas = Canvas(bitmap)
+            
+            // Fill background with white
+            canvas.drawColor(Color.WHITE)
+            
+            // Draw each line of text with proper left padding
+            lines.forEachIndexed { index, line ->
+                val x = padding.toFloat() // Start from padding distance from left edge
+                val y = padding + (index + 1) * lineHeight - (paint.descent() / 2) // Better vertical alignment
+                canvas.drawText(line, x, y, paint)
+            }
+            
+            Log.d("TiggPrinter", "Created text bitmap: ${bitmap.width}x${bitmap.height}, lines: ${lines.size}, padding: ${padding}px")
+            bitmap
+        } catch (e: Exception) {
+            Log.e("TiggPrinter", "Error creating text bitmap: ${e.message}", e)
+            null
+        }
     }
 }

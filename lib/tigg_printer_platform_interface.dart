@@ -60,7 +60,11 @@ abstract class TiggPrinterPlatform extends PlatformInterface {
   }
 
   /// Print plain text
-  Future<PrintResult> printText({required String text, int textSize = 24}) {
+  Future<PrintResult> printText({
+    required String text,
+    int textSize = 24,
+    int paperWidth = 384,
+  }) {
     throw UnimplementedError('printText() has not been implemented.');
   }
 

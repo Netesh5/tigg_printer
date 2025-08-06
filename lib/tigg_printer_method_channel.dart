@@ -43,10 +43,19 @@ class MethodChannelTiggPrinter extends TiggPrinterPlatform {
         'textSize': textSize,
       });
 
-      return PrintResult(
-        success: true,
-        message: result as String? ?? 'Print completed successfully',
-      );
+      // Handle both Map and String responses
+      if (result is Map) {
+        return PrintResult(
+          success: result['success'] as bool? ?? true,
+          message:
+              result['message'] as String? ?? 'Print completed successfully',
+        );
+      } else {
+        return PrintResult(
+          success: true,
+          message: result as String? ?? 'Print completed successfully',
+        );
+      }
     } on PlatformException catch (e) {
       throw TiggPrinterException(
         e.code,
@@ -65,6 +74,7 @@ class MethodChannelTiggPrinter extends TiggPrinterPlatform {
   Future<PrintResult> printText({
     required String text,
     int textSize = 24,
+    int paperWidth = 384,
   }) async {
     // Input validation
     if (text.isEmpty) {
@@ -78,16 +88,32 @@ class MethodChannelTiggPrinter extends TiggPrinterPlatform {
       );
     }
 
+    if (paperWidth <= 0 || paperWidth > 1000) {
+      throw const TiggPrinterException(
+        'INVALID_INPUT',
+        'Paper width must be between 1 and 1000 pixels',
+      );
+    }
+
     try {
       final result = await methodChannel.invokeMethod('printText', {
         'text': text,
         'textSize': textSize,
+        'paperWidth': paperWidth,
       });
 
-      return PrintResult(
-        success: true,
-        message: result as String? ?? 'Text printed successfully',
-      );
+      // Handle both Map and String responses
+      if (result is Map) {
+        return PrintResult(
+          success: result['success'] as bool? ?? true,
+          message: result['message'] as String? ?? 'Text printed successfully',
+        );
+      } else {
+        return PrintResult(
+          success: true,
+          message: result as String? ?? 'Text printed successfully',
+        );
+      }
     } on PlatformException catch (e) {
       throw TiggPrinterException(
         e.code,
