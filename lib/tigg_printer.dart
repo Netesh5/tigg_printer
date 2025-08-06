@@ -116,6 +116,29 @@ class TiggPrinter {
     );
   }
 
+  /// Print raw byte data (for ESC/POS commands from esc_pos_utils_plus)
+  /// This allows you to use existing ESC/POS command bytes directly
+  static Future<PrintResult> printRawBytes({required List<int> bytes}) async {
+    // Check service connection before printing
+    try {
+      final isConnected = await isServiceConnected();
+      if (!isConnected) {
+        throw const TiggPrinterException(
+          'SERVICE_NOT_CONNECTED',
+          'Printer service is not connected. Use bindServiceWithRetry() to establish connection.',
+        );
+      }
+    } catch (e) {
+      if (e is TiggPrinterException) rethrow;
+      throw TiggPrinterException(
+        'SERVICE_CHECK_FAILED',
+        'Failed to check service status: ${e.toString()}',
+      );
+    }
+
+    return TiggPrinterPlatform.instance.printRawBytes(bytes: bytes);
+  }
+
   /// Check if the printer service is available
   static Future<bool> isPrinterAvailable() {
     return TiggPrinterPlatform.instance.isPrinterAvailable();

@@ -129,6 +129,58 @@ class MethodChannelTiggPrinter extends TiggPrinterPlatform {
   }
 
   @override
+  Future<PrintResult> printRawBytes({required List<int> bytes}) async {
+    // Input validation
+    if (bytes.isEmpty) {
+      throw const TiggPrinterException(
+        'INVALID_INPUT',
+        'Bytes cannot be empty',
+      );
+    }
+
+    // Validate byte values (0-255)
+    for (int i = 0; i < bytes.length; i++) {
+      if (bytes[i] < 0 || bytes[i] > 255) {
+        throw TiggPrinterException(
+          'INVALID_INPUT',
+          'Invalid byte value at index $i: ${bytes[i]}. Bytes must be 0-255.',
+        );
+      }
+    }
+
+    try {
+      final result = await methodChannel.invokeMethod('printRawBytes', {
+        'bytes': bytes,
+      });
+
+      // Handle both Map and String responses
+      if (result is Map) {
+        return PrintResult(
+          success: result['success'] as bool? ?? true,
+          message:
+              result['message'] as String? ?? 'Raw bytes printed successfully',
+        );
+      } else {
+        return PrintResult(
+          success: true,
+          message: result as String? ?? 'Raw bytes printed successfully',
+        );
+      }
+    } on PlatformException catch (e) {
+      throw TiggPrinterException(
+        e.code,
+        e.message ?? 'Unknown platform error',
+        e.details,
+      );
+    } catch (e) {
+      throw TiggPrinterException(
+        'UNKNOWN_ERROR',
+        'Unexpected error: ${e.toString()}',
+      );
+    }
+  }
+
+  @override
   Future<bool> isPrinterAvailable() async {
     try {
       await methodChannel.invokeMethod('isPrinterAvailable');

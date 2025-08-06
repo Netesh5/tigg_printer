@@ -68,6 +68,11 @@ abstract class TiggPrinterPlatform extends PlatformInterface {
     throw UnimplementedError('printText() has not been implemented.');
   }
 
+  /// Print raw byte data (for ESC/POS commands)
+  Future<PrintResult> printRawBytes({required List<int> bytes}) {
+    throw UnimplementedError('printRawBytes() has not been implemented.');
+  }
+
   /// Check if the printer service is available
   Future<bool> isPrinterAvailable() {
     throw UnimplementedError('isPrinterAvailable() has not been implemented.');

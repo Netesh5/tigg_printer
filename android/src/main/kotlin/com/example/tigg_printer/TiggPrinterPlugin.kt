@@ -358,6 +358,79 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         result.error("PRINT_EXCEPTION", "Unexpected error during printing: ${e.message}", null)
     }
 }
+            "printRawBytes" -> {
+                val bytes = call.argument<List<Int>>("bytes")
+
+                if (bytes.isNullOrEmpty()) {
+                    result.error("INVALID_INPUT", "Bytes array is required", null)
+                    return
+                }
+
+                // Validate byte values
+                for (i in bytes.indices) {
+                    val byteValue = bytes[i]
+                    if (byteValue < 0 || byteValue > 255) {
+                        result.error("INVALID_INPUT", "Invalid byte value at index $i: $byteValue. Bytes must be 0-255.", null)
+                        return
+                    }
+                }
+
+                try {
+                    if (AppService.me() == null) {
+                        result.error("SERVICE_UNAVAILABLE", "Printer service is not initialized", null)
+                        return
+                    }
+
+                    // Attempt re-bind if not connected
+                    if (!AppService.me().isServiceConnected()) {
+                        Log.w("TiggPrinter", "Service not connected. Attempting re-bind before printing...")
+                        AppService.me().bindService()
+                        Thread.sleep(1000) // Wait for binding
+                    }
+
+                    if (!AppService.me().isServiceConnected()) {
+                        result.error("SERVICE_NOT_CONNECTED", "Printer service is still not connected after retry", null)
+                        return
+                    }
+
+                    // Convert List<Int> to ByteArray
+                    val byteArray = bytes.map { it.toByte() }.toByteArray()
+                    
+                    Log.d("TiggPrinter", "Printing raw bytes, length: ${byteArray.size}")
+
+                    // Convert byte array to string for printing
+                    // ESC/POS commands are often text-based with control characters
+                    val dataString = String(byteArray, Charsets.ISO_8859_1) // Use Latin-1 for binary data
+                    
+                    // Use AppService to print the raw string data
+                    AppService.me().startPrinting(dataString, false, object : IPaymentCallback.Stub() {
+                        override fun onSuccess(success: Boolean, message: String?) {
+                            Log.d("TiggPrinter", "Raw bytes print callback - onSuccess: success=$success, message=$message")
+                            context.mainExecutor.execute {
+                                if (success) {
+                                    result.success(mapOf(
+                                        "success" to true,
+                                        "message" to "Raw bytes printed successfully"
+                                    ))
+                                } else {
+                                    result.error("PRINT_FAILED", message ?: "Raw bytes print operation failed", null)
+                                }
+                            }
+                        }
+
+                        override fun onResponse(response: Bundle?) {
+                            Log.d("TiggPrinter", "Raw bytes print callback - onResponse: $response")
+                        }
+                    })
+
+                } catch (e: RemoteException) {
+                    result.error("REMOTE_EXCEPTION", "Printer service communication error: ${e.message}", null)
+                } catch (e: IllegalArgumentException) {
+                    result.error("INVALID_INPUT", "Invalid input parameters: ${e.message}", null)
+                } catch (e: Exception) {
+                    result.error("PRINT_EXCEPTION", "Unexpected error during raw bytes printing: ${e.message}", null)
+                }
+            }
 
             else -> result.notImplemented()
         }
