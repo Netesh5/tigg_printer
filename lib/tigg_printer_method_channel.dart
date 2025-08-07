@@ -129,7 +129,11 @@ class MethodChannelTiggPrinter extends TiggPrinterPlatform {
   }
 
   @override
-  Future<PrintResult> printRawBytes({required List<int> bytes}) async {
+  Future<PrintResult> printRawBytes({
+    required List<int> bytes,
+    bool useDirectString = false,
+    int textSize = 0,
+  }) async {
     // Input validation
     if (bytes.isEmpty) {
       throw const TiggPrinterException(
@@ -151,6 +155,8 @@ class MethodChannelTiggPrinter extends TiggPrinterPlatform {
     try {
       final result = await methodChannel.invokeMethod('printRawBytes', {
         'bytes': bytes,
+        'useDirectString': useDirectString,
+        'textSize': textSize,
       });
 
       // Handle both Map and String responses

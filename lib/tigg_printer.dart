@@ -118,7 +118,15 @@ class TiggPrinter {
 
   /// Print raw byte data (for ESC/POS commands from esc_pos_utils_plus)
   /// This allows you to use existing ESC/POS command bytes directly
-  static Future<PrintResult> printRawBytes({required List<int> bytes}) async {
+  ///
+  /// [useDirectString] - if true, uses string method (may show default header)
+  /// [useDirectString] - if false, uses bitmap method (avoids default header)
+  /// [textSize] - only used when useDirectString=true
+  static Future<PrintResult> printRawBytes({
+    required List<int> bytes,
+    bool useDirectString = false,
+    int textSize = 0,
+  }) async {
     // Check service connection before printing
     try {
       final isConnected = await isServiceConnected();
@@ -136,7 +144,11 @@ class TiggPrinter {
       );
     }
 
-    return TiggPrinterPlatform.instance.printRawBytes(bytes: bytes);
+    return TiggPrinterPlatform.instance.printRawBytes(
+      bytes: bytes,
+      useDirectString: useDirectString,
+      textSize: textSize,
+    );
   }
 
   /// Check if the printer service is available

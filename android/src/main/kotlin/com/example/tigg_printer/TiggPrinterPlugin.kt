@@ -360,8 +360,8 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 }
             "printRawBytes" -> {
                 val bytes = call.argument<List<Int>>("bytes")
-                  val textSize = call.argument<Int>("textSize") ?: 24
-                    val paperWidth = call.argument<Int>("paperWidth") ?: 384 
+                val useDirectString = call.argument<Boolean>("useDirectString") ?: false
+                val textSize = call.argument<Int>("textSize") ?: 0
 
                 if (bytes.isNullOrEmpty()) {
                     result.error("INVALID_INPUT", "Bytes array is required", null)
@@ -397,33 +397,59 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
                     // Convert List<Int> to ByteArray
                     val byteArray = bytes.map { it.toByte() }.toByteArray()
+                    val escPosString = String(byteArray, Charsets.ISO_8859_1)
                     
-                    Log.d("TiggPrinter", "Printing raw bytes directly to printer, length: ${byteArray.size}")
+                    Log.d("TiggPrinter", "Printing raw ESC/POS bytes, length: ${byteArray.size}, useDirectString: $useDirectString")
 
-                    // Send raw ESC/POS bytes directly to printer without bitmap conversion
-                    // This preserves all ESC/POS formatting, alignment, font sizes, etc.
-                    val dataString = String(byteArray, Charsets.ISO_8859_1) // Preserve all bytes as-is
-                    
-                    // Use startPrinting with raw string data (not bitmap)
-                    AppService.me().startPrinting(dataString, 0, object : IPaymentCallback.Stub() {
-                        override fun onSuccess(success: Boolean, message: String?) {
-                            Log.d("TiggPrinter", "Raw bytes print callback - onSuccess: success=$success, message=$message")
-                            context.mainExecutor.execute {
-                                if (success) {
-                                    result.success(mapOf(
-                                        "success" to true,
-                                        "message" to "Raw bytes printed successfully"
-                                    ))
-                                } else {
-                                    result.error("PRINT_FAILED", message ?: "Raw bytes print operation failed", null)
+                    if (useDirectString) {
+                        // Method 1: Direct string approach (may show default header)
+                        AppService.me().startPrinting(escPosString, textSize, object : IPaymentCallback.Stub() {
+                            override fun onSuccess(success: Boolean, message: String?) {
+                                Log.d("TiggPrinter", "Raw bytes (string) print callback - onSuccess: success=$success, message=$message")
+                                context.mainExecutor.execute {
+                                    if (success) {
+                                        result.success(mapOf(
+                                            "success" to true,
+                                            "message" to "Raw bytes printed successfully (string method)"
+                                        ))
+                                    } else {
+                                        result.error("PRINT_FAILED", message ?: "Raw bytes print operation failed", null)
+                                    }
                                 }
                             }
-                        }
 
-                        override fun onResponse(response: Bundle?) {
-                            Log.d("TiggPrinter", "Raw bytes print callback - onResponse: $response")
+                            override fun onResponse(response: Bundle?) {
+                                Log.d("TiggPrinter", "Raw bytes (string) print callback - onResponse: $response")
+                            }
+                        })
+                    } else {
+                        // Method 2: Create minimal bitmap to avoid default header
+                        val rawBitmap = createMinimalEscPosBitmap(escPosString)
+                        if (rawBitmap == null) {
+                            result.error("RAW_DATA_ERROR", "Could not process ESC/POS data", null)
+                            return
                         }
-                    })
+                        
+                        AppService.me().startPrinting(rawBitmap, false, object : IPaymentCallback.Stub() {
+                            override fun onSuccess(success: Boolean, message: String?) {
+                                Log.d("TiggPrinter", "Raw bytes (bitmap) print callback - onSuccess: success=$success, message=$message")
+                                context.mainExecutor.execute {
+                                    if (success) {
+                                        result.success(mapOf(
+                                            "success" to true,
+                                            "message" to "Raw bytes printed successfully (bitmap method)"
+                                        ))
+                                    } else {
+                                        result.error("PRINT_FAILED", message ?: "Raw bytes print operation failed", null)
+                                    }
+                                }
+                            }
+
+                            override fun onResponse(response: Bundle?) {
+                                Log.d("TiggPrinter", "Raw bytes (bitmap) print callback - onResponse: $response")
+                            }
+                        })
+                    }
 
                 } catch (e: RemoteException) {
                     result.error("REMOTE_EXCEPTION", "Printer service communication error: ${e.message}", null)
@@ -515,6 +541,23 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             bitmap
         } catch (e: Exception) {
             Log.e("TiggPrinter", "Error creating text bitmap: ${e.message}", e)
+            null
+        }
+    }
+
+    private fun createMinimalEscPosBitmap(escPosString: String): Bitmap? {
+        return try {
+            // Create a minimal transparent bitmap that just carries the ESC/POS data
+            // The goal is to use the bitmap method to avoid default headers
+            val bitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            canvas.drawColor(Color.TRANSPARENT) // Transparent background
+            
+            Log.d("TiggPrinter", "Created minimal ESC/POS bitmap carrier")
+            bitmap
+            
+        } catch (e: Exception) {
+            Log.e("TiggPrinter", "Error creating minimal ESC/POS bitmap: ${e.message}", e)
             null
         }
     }

@@ -69,7 +69,11 @@ abstract class TiggPrinterPlatform extends PlatformInterface {
   }
 
   /// Print raw byte data (for ESC/POS commands)
-  Future<PrintResult> printRawBytes({required List<int> bytes}) {
+  Future<PrintResult> printRawBytes({
+    required List<int> bytes,
+    bool useDirectString = false,
+    int textSize = 0,
+  }) {
     throw UnimplementedError('printRawBytes() has not been implemented.');
   }
 

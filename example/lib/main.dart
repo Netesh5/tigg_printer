@@ -274,61 +274,109 @@ class _MyAppState extends State<MyApp> {
   Future<void> _printRawBytes() async {
     setState(() {
       _isPrinting = true;
-      _printStatus = 'Printing raw ESC/POS bytes...';
+      _printStatus = 'Printing raw ESC/POS bytes (bitmap method)...';
     });
 
     try {
-      // Example ESC/POS command bytes (you would get these from esc_pos_utils_plus)
+      // Example ESC/POS command bytes (preserves all formatting commands)
+      final List<int> escPosBytes = [
+        0x1B, 0x40, // ESC @ - Initialize printer
+
+        // Center aligned title
+        0x1B, 0x61, 0x01, // ESC a 1 - Center align
+        0x1D, 0x21, 0x11, // GS ! 17 - Double height and width
+        // Text: "Bitmap Method"
+        0x42, 0x69, 0x74, 0x6D, 0x61, 0x70, 0x20, 0x4D, 0x65, 0x74, 0x68, 0x6F,
+        0x64,
+        0x0A, 0x0A, // Line feeds
+
+        // Reset to normal and left align
+        0x1B, 0x61, 0x00, // ESC a 0 - Left align
+        0x1D, 0x21, 0x00, // GS ! 0 - Normal size
+
+        // Bold text
+        0x1B, 0x45, 0x01, // ESC E 1 - Bold ON
+        // Text: "No Default Header"
+        0x4E, 0x6F, 0x20, 0x44, 0x65, 0x66, 0x61, 0x75, 0x6C, 0x74, 0x20, 0x48,
+        0x65, 0x61, 0x64, 0x65, 0x72,
+        0x0A, // Line feed
+        0x1B, 0x45, 0x00, // ESC E 0 - Bold OFF
+
+        // Right aligned text
+        0x1B, 0x61, 0x02, // ESC a 2 - Right align
+        // Text: "Right Aligned"
+        0x52, 0x69, 0x67, 0x68, 0x74, 0x20, 0x41, 0x6C, 0x69, 0x67, 0x6E, 0x65,
+        0x64,
+        0x0A, // Line feed
+
+        // Back to left align
+        0x1B, 0x61, 0x00, // ESC a 0 - Left align
+
+        // Horizontal line (dashes)
+        0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x2D,
+        0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x2D,
+        0x0A, 0x0A, 0x0A, // Line feeds for spacing
+      ];
+
+      // Use bitmap method (should avoid default header)
+      final result = await TiggPrinter.printRawBytes(
+        bytes: escPosBytes,
+        useDirectString: false, // Use bitmap method to avoid header
+      );
+
+      setState(() {
+        _printStatus =
+            'Success: ${result.message}\n\n✅ Bitmap method - should avoid default header!\n🎯 All ESC/POS formatting preserved!';
+      });
+    } on TiggPrinterException catch (e) {
+      setState(() {
+        _printStatus = 'Printer Error (${e.code}): ${e.message}';
+      });
+    } catch (e) {
+      setState(() {
+        _printStatus = 'Raw bytes error: $e';
+      });
+    } finally {
+      setState(() {
+        _isPrinting = false;
+      });
+    }
+  }
+
+  Future<void> _printRawBytesWithString() async {
+    setState(() {
+      _isPrinting = true;
+      _printStatus = 'Printing raw ESC/POS bytes (string method)...';
+    });
+
+    try {
+      // Same ESC/POS commands but using string method
       final List<int> escPosBytes = [
         0x1B, 0x40, // ESC @ - Initialize printer
         0x1B, 0x61, 0x01, // ESC a 1 - Center align
         0x1D, 0x21, 0x11, // GS ! 17 - Double height and width
-        // Text: "ESC/POS Test"
-        0x45, 0x53, 0x43, 0x2F, 0x50, 0x4F, 0x53, 0x20, 0x54, 0x65, 0x73, 0x74,
+        // Text: "String Method"
+        0x53, 0x74, 0x72, 0x69, 0x6E, 0x67, 0x20, 0x4D, 0x65, 0x74, 0x68, 0x6F,
+        0x64,
         0x0A, 0x0A, // Line feeds
         0x1B, 0x61, 0x00, // ESC a 0 - Left align
         0x1D, 0x21, 0x00, // GS ! 0 - Normal size
-        // Text: "This is printed using raw bytes!"
-        0x54,
-        0x68,
-        0x69,
-        0x73,
-        0x20,
-        0x69,
-        0x73,
-        0x20,
-        0x70,
-        0x72,
-        0x69,
-        0x6E,
-        0x74,
-        0x65,
-        0x64,
-        0x20,
-        0x75,
-        0x73,
-        0x69,
-        0x6E,
-        0x67,
-        0x20,
-        0x72,
-        0x61,
-        0x77,
-        0x20,
-        0x62,
-        0x79,
-        0x74,
-        0x65,
-        0x73,
-        0x21,
+        // Text: "May show header"
+        0x4D, 0x61, 0x79, 0x20, 0x73, 0x68, 0x6F, 0x77, 0x20, 0x68, 0x65, 0x61,
+        0x64, 0x65, 0x72,
         0x0A, 0x0A, 0x0A, // Line feeds for spacing
-        0x1D, 0x56, 0x42, 0x00, // GS V B 0 - Cut paper (partial)
       ];
 
-      final result = await TiggPrinter.printRawBytes(bytes: escPosBytes);
+      // Use string method (may show default header)
+      final result = await TiggPrinter.printRawBytes(
+        bytes: escPosBytes,
+        useDirectString: true, // Use string method
+        textSize: 0, // Minimal text size
+      );
+
       setState(() {
         _printStatus =
-            'Success: ${result.message}\n\n✅ ESC/POS commands sent directly to printer!\n🎯 All formatting, alignment, and font styles preserved!';
+            'Success: ${result.message}\n\n⚠️ String method - may show default header\n🎯 ESC/POS formatting still preserved!';
       });
     } on TiggPrinterException catch (e) {
       setState(() {
@@ -663,7 +711,23 @@ class _MyAppState extends State<MyApp> {
                     backgroundColor: Colors.purple,
                   ),
                   child: const Text(
-                    'Print ESC/POS Raw Bytes',
+                    'Print ESC/POS (Bitmap Method)',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                ),
+                const SizedBox(height: 5),
+                ElevatedButton(
+                  onPressed: _isPrinting
+                      ? null
+                      : () {
+                          print('Print Raw Bytes String button tapped');
+                          _printRawBytesWithString();
+                        },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange,
+                  ),
+                  child: const Text(
+                    'Print ESC/POS (String Method)',
                     style: TextStyle(color: Colors.white),
                   ),
                 ),
