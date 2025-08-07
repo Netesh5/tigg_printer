@@ -402,8 +402,14 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     // ESC/POS commands are often text-based with control characters
                     val dataString = String(byteArray, Charsets.ISO_8859_1) // Use Latin-1 for binary data
                     
+                     val bitmap = createTextBitmap(dataString, textSize, paperWidth)
+                        if (bitmap == null) {
+                            result.error("TEXT_RENDER_ERROR", "Could not create text bitmap", null)
+                            return
+                        }
+
                     // Use AppService to print the raw string data
-                    AppService.me().startPrinting(dataString, false, object : IPaymentCallback.Stub() {
+                    AppService.me().startPrinting(bitmap, false, object : IPaymentCallback.Stub() {
                         override fun onSuccess(success: Boolean, message: String?) {
                             Log.d("TiggPrinter", "Raw bytes print callback - onSuccess: success=$success, message=$message")
                             context.mainExecutor.execute {
