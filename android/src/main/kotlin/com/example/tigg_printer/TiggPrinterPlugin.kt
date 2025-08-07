@@ -398,20 +398,14 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     // Convert List<Int> to ByteArray
                     val byteArray = bytes.map { it.toByte() }.toByteArray()
                     
-                    Log.d("TiggPrinter", "Printing raw bytes, length: ${byteArray.size}")
+                    Log.d("TiggPrinter", "Printing raw bytes directly to printer, length: ${byteArray.size}")
 
-                    // Convert byte array to string for printing
-                    // ESC/POS commands are often text-based with control characters
-                    val dataString = String(byteArray, Charsets.ISO_8859_1) // Use Latin-1 for binary data
+                    // Send raw ESC/POS bytes directly to printer without bitmap conversion
+                    // This preserves all ESC/POS formatting, alignment, font sizes, etc.
+                    val dataString = String(byteArray, Charsets.ISO_8859_1) // Preserve all bytes as-is
                     
-                     val bitmap = createTextBitmap(dataString, textSize, paperWidth)
-                        if (bitmap == null) {
-                            result.error("TEXT_RENDER_ERROR", "Could not create text bitmap", null)
-                            return
-                        }
-
-                    // Use AppService to print the raw string data
-                    AppService.me().startPrinting(bitmap, false, object : IPaymentCallback.Stub() {
+                    // Use startPrinting with raw string data (not bitmap)
+                    AppService.me().startPrinting(dataString, 0, object : IPaymentCallback.Stub() {
                         override fun onSuccess(success: Boolean, message: String?) {
                             Log.d("TiggPrinter", "Raw bytes print callback - onSuccess: success=$success, message=$message")
                             context.mainExecutor.execute {

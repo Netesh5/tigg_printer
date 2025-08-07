@@ -184,18 +184,17 @@ class _MyAppState extends State<MyApp> {
 
     try {
       // Add timeout to prevent hanging
-      final result =
-          await TiggPrinter.printBase64Image(
-            base64Image: _exampleBase64Image,
-            textSize: _textSize.round(),
-          ).timeout(
-            const Duration(seconds: 30),
-            onTimeout: () {
-              throw TimeoutException(
-                'Print operation timed out after 30 seconds',
-              );
-            },
+      final result = await TiggPrinter.printBase64Image(
+        base64Image: _exampleBase64Image,
+        textSize: _textSize.round(),
+      ).timeout(
+        const Duration(seconds: 30),
+        onTimeout: () {
+          throw TimeoutException(
+            'Print operation timed out after 30 seconds',
           );
+        },
+      );
       setState(() {
         _printStatus = 'Success: ${result.message}';
       });
@@ -328,7 +327,8 @@ class _MyAppState extends State<MyApp> {
 
       final result = await TiggPrinter.printRawBytes(bytes: escPosBytes);
       setState(() {
-        _printStatus = 'Success: ${result.message}';
+        _printStatus =
+            'Success: ${result.message}\n\n✅ ESC/POS commands sent directly to printer!\n🎯 All formatting, alignment, and font styles preserved!';
       });
     } on TiggPrinterException catch (e) {
       setState(() {
@@ -354,9 +354,8 @@ class _MyAppState extends State<MyApp> {
     try {
       final isAvailable = await TiggPrinter.isPrinterAvailable();
       setState(() {
-        _printStatus = isAvailable
-            ? 'Printer is available ✓'
-            : 'Printer not available ✗';
+        _printStatus =
+            isAvailable ? 'Printer is available ✓' : 'Printer not available ✗';
       });
     } on TiggPrinterException catch (e) {
       setState(() {
