@@ -40,7 +40,7 @@ rootProject.allprojects {
 android {
     namespace = "com.example.tigg_printer"
 
-    compileSdk = 35
+    compileSdk = 34
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
