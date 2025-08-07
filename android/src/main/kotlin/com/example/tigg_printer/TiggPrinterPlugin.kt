@@ -360,6 +360,8 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 }
             "printRawBytes" -> {
                 val bytes = call.argument<List<Int>>("bytes")
+                  val textSize = call.argument<Int>("textSize") ?: 24
+                    val paperWidth = call.argument<Int>("paperWidth") ?: 384 
 
                 if (bytes.isNullOrEmpty()) {
                     result.error("INVALID_INPUT", "Bytes array is required", null)
