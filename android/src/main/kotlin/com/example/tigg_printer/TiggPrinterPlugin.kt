@@ -557,11 +557,11 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         return try {
             Log.d("TiggPrinter", "Creating ESC/POS bitmap, paperSize: $paperSize, dataLength: ${escPosString.length}")
             
-            // Extract simple text content from ESC/POS data
-            val textContent = extractSimpleTextFromEscPos(escPosString)
+            // Parse ESC/POS commands and extract formatted content
+            val formattedLines = parseEscPosWithFormatting(escPosString, paperSize)
             
-            if (textContent.isBlank()) {
-                Log.w("TiggPrinter", "No printable text found in ESC/POS data")
+            if (formattedLines.isEmpty()) {
+                Log.w("TiggPrinter", "No content extracted from ESC/POS data")
                 // Create a simple test bitmap to ensure something prints
                 val bitmap = Bitmap.createBitmap(paperSize, 100, Bitmap.Config.ARGB_8888)
                 val canvas = Canvas(bitmap)
@@ -579,31 +579,65 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 return bitmap
             }
             
-            // Create bitmap with extracted text
-            val lines = textContent.split('\n').filter { it.isNotBlank() }
+            // Calculate total height needed
+            val baseTextSize = 24.0f
+            val lineSpacing = 1.3f
+            var totalHeight = 20f // Top padding
             
-            val paint = Paint().apply {
-                color = Color.BLACK
-                textSize = 20.0f
-                typeface = Typeface.MONOSPACE
-                isAntiAlias = true
+            for (line in formattedLines) {
+                val textSize = when {
+                    line.isDoubleSize -> baseTextSize * 1.5f
+                    else -> baseTextSize
+                }
+                totalHeight += textSize * lineSpacing
             }
+            totalHeight += 40f // Bottom padding
             
-            val lineHeight = paint.textSize * 1.3f
-            val totalHeight = (lines.size * lineHeight + 40).toInt()
-            
-            val bitmap = Bitmap.createBitmap(paperSize, totalHeight, Bitmap.Config.ARGB_8888)
+            // Create bitmap
+            val bitmap = Bitmap.createBitmap(paperSize, totalHeight.toInt(), Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bitmap)
             canvas.drawColor(Color.WHITE)
             
-            // Draw each line
-            var y = lineHeight
-            for (line in lines) {
-                canvas.drawText(line, 8f, y, paint)
-                y += lineHeight
+            // Draw each line with proper formatting
+            var y = baseTextSize * lineSpacing + 10f
+            for (line in formattedLines) {
+                if (line.text.isNotBlank()) {
+                    val paint = Paint().apply {
+                        color = Color.BLACK
+                        textSize = when {
+                            line.isDoubleSize -> baseTextSize * 1.5f
+                            else -> baseTextSize
+                        }
+                        typeface = if (line.isBold) Typeface.DEFAULT_BOLD else Typeface.MONOSPACE
+                        isAntiAlias = true
+                    }
+                    
+                    // Wrap text to fit paper width
+                    val wrappedLines = wrapText(line.text, paint, paperSize - 16f) // 8px padding each side
+                    
+                    for (wrappedLine in wrappedLines) {
+                        val x = when (line.alignment) {
+                            1 -> { // Center
+                                val textWidth = paint.measureText(wrappedLine)
+                                (paperSize - textWidth) / 2f
+                            }
+                            2 -> { // Right
+                                val textWidth = paint.measureText(wrappedLine)
+                                paperSize - textWidth - 8f
+                            }
+                            else -> 8f // Left
+                        }
+                        
+                        canvas.drawText(wrappedLine, x, y, paint)
+                        y += paint.textSize * lineSpacing
+                    }
+                } else {
+                    // Empty line - add spacing
+                    y += baseTextSize * 0.5f
+                }
             }
             
-            Log.d("TiggPrinter", "Created ESC/POS bitmap: ${paperSize}x${totalHeight}, ${lines.size} lines")
+            Log.d("TiggPrinter", "Created ESC/POS bitmap: ${paperSize}x${totalHeight.toInt()}, ${formattedLines.size} lines")
             bitmap
             
         } catch (e: Exception) {
@@ -620,6 +654,136 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 null
             }
         }
+    }
+    
+    private data class FormattedLine(
+        val text: String,
+        val alignment: Int = 0, // 0=left, 1=center, 2=right
+        val isBold: Boolean = false,
+        val isDoubleSize: Boolean = false
+    )
+    
+    private fun parseEscPosWithFormatting(escPosString: String, paperWidth: Int): List<FormattedLine> {
+        val lines = mutableListOf<FormattedLine>()
+        val bytes = escPosString.toByteArray(Charsets.ISO_8859_1)
+        
+        var i = 0
+        var currentAlignment = 0
+        var currentBold = false
+        var currentDoubleSize = false
+        val textBuffer = StringBuilder()
+        
+        while (i < bytes.size) {
+            val byte = bytes[i].toInt() and 0xFF
+            
+            when (byte) {
+                0x1B -> { // ESC command
+                    if (i + 1 < bytes.size) {
+                        when (bytes[i + 1].toInt() and 0xFF) {
+                            0x40 -> { // ESC @ - Initialize printer
+                                i += 2
+                                continue
+                            }
+                            0x61 -> { // ESC a - Alignment
+                                if (i + 2 < bytes.size) {
+                                    // Flush current text if any
+                                    if (textBuffer.isNotEmpty()) {
+                                        lines.add(FormattedLine(textBuffer.toString().trim(), currentAlignment, currentBold, currentDoubleSize))
+                                        textBuffer.clear()
+                                    }
+                                    currentAlignment = bytes[i + 2].toInt() and 0xFF
+                                    i += 3
+                                    continue
+                                }
+                            }
+                            0x45 -> { // ESC E - Bold
+                                if (i + 2 < bytes.size) {
+                                    currentBold = (bytes[i + 2].toInt() and 0xFF) == 1
+                                    i += 3
+                                    continue
+                                }
+                            }
+                        }
+                    }
+                    // Skip unrecognized ESC commands
+                    i += if (i + 1 < bytes.size) 2 else 1
+                }
+                0x1D -> { // GS command
+                    if (i + 1 < bytes.size) {
+                        when (bytes[i + 1].toInt() and 0xFF) {
+                            0x21 -> { // GS ! - Character size
+                                if (i + 2 < bytes.size) {
+                                    val sizeCmd = bytes[i + 2].toInt() and 0xFF
+                                    currentDoubleSize = (sizeCmd and 0x11) != 0
+                                    i += 3
+                                    continue
+                                }
+                            }
+                            0x56 -> { // GS V - Cut paper
+                                i += if (i + 3 < bytes.size) 4 else 2
+                                continue
+                            }
+                        }
+                    }
+                    // Skip unrecognized GS commands
+                    i += if (i + 1 < bytes.size) 2 else 1
+                }
+                0x0A -> { // Line feed
+                    val lineText = textBuffer.toString().trim()
+                    lines.add(FormattedLine(lineText, currentAlignment, currentBold, currentDoubleSize))
+                    textBuffer.clear()
+                    i++
+                }
+                0x0D -> { // Carriage return - skip
+                    i++
+                }
+                in 0x20..0x7E -> { // Printable ASCII
+                    textBuffer.append(byte.toChar())
+                    i++
+                }
+                else -> {
+                    // Skip non-printable characters
+                    i++
+                }
+            }
+        }
+        
+        // Add any remaining text
+        if (textBuffer.isNotEmpty()) {
+            val lineText = textBuffer.toString().trim()
+            if (lineText.isNotEmpty()) {
+                lines.add(FormattedLine(lineText, currentAlignment, currentBold, currentDoubleSize))
+            }
+        }
+        
+        return lines.filter { it.text.isNotEmpty() || lines.indexOf(it) == 0 } // Keep content lines and first empty line for spacing
+    }
+    
+    private fun wrapText(text: String, paint: Paint, maxWidth: Float): List<String> {
+        if (text.isEmpty()) return listOf("")
+        
+        val words = text.split(" ")
+        val lines = mutableListOf<String>()
+        var currentLine = StringBuilder()
+        
+        for (word in words) {
+            val testLine = if (currentLine.isEmpty()) word else "${currentLine} $word"
+            val textWidth = paint.measureText(testLine)
+            
+            if (textWidth <= maxWidth || currentLine.isEmpty()) {
+                if (currentLine.isNotEmpty()) currentLine.append(" ")
+                currentLine.append(word)
+            } else {
+                lines.add(currentLine.toString())
+                currentLine = StringBuilder(word)
+            }
+        }
+        
+        if (currentLine.isNotEmpty()) {
+            lines.add(currentLine.toString())
+        }
+        
+        return if (lines.isEmpty()) listOf("") else lines
     }
     
     private fun extractSimpleTextFromEscPos(escPosString: String): String {
