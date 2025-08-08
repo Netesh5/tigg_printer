@@ -590,9 +590,9 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
             
             // Calculate total height needed
-            val baseTextSize = 16.0f
-            val lineSpacing = 1.3f
-            var totalHeight = 20f // Top padding
+            val baseTextSize = 14.0f // Reduced for better fitting
+            val lineSpacing = 1.2f // Reduced spacing
+            var totalHeight = 15f // Top padding
             
             for (line in formattedLines) {
                 val textSize = when {
@@ -601,7 +601,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
                 totalHeight += textSize * lineSpacing
             }
-            totalHeight += 40f // Bottom padding
+            totalHeight += 30f // Bottom padding
             
             // Create bitmap
             val bitmap = Bitmap.createBitmap(paperSize, totalHeight.toInt(), Bitmap.Config.ARGB_8888)
@@ -622,8 +622,8 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                         isAntiAlias = true
                     }
                     
-                    // Wrap text to fit paper width
-                    val wrappedLines = wrapText(line.text, paint, paperSize - 16f) // 8px padding each side
+                    // Wrap text to fit paper width with better margins
+                    val wrappedLines = wrapText(line.text, paint, paperSize - 12f) // 6px padding each side
                     
                     for (wrappedLine in wrappedLines) {
                         val x = when (line.alignment) {
@@ -633,9 +633,9 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                             }
                             2 -> { // Right
                                 val textWidth = paint.measureText(wrappedLine)
-                                paperSize - textWidth - 8f
+                                paperSize - textWidth - 6f
                             }
-                            else -> 8f // Left
+                            else -> 6f // Left
                         }
                         
                         canvas.drawText(wrappedLine, x, y, paint)
@@ -787,7 +787,10 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
                 0x0A -> { // Line feed
                     val lineText = textBuffer.toString().trim()
-                    lines.add(FormattedLine(lineText, currentAlignment, currentBold, currentDoubleSize))
+                    // Only add non-empty lines to prevent dots
+                    if (lineText.isNotEmpty()) {
+                        lines.add(FormattedLine(lineText, currentAlignment, currentBold, currentDoubleSize))
+                    }
                     textBuffer.clear()
                     i++
                 }
