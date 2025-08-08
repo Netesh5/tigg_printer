@@ -322,6 +322,7 @@ class _MyAppState extends State<MyApp> {
       final result = await TiggPrinter.printRawBytes(
         bytes: escPosBytes,
         useDirectString: false, // Use bitmap method to avoid header
+        paperWidth: _paperWidth, // Use configurable paper width
       );
 
       setState(() {
@@ -372,6 +373,7 @@ class _MyAppState extends State<MyApp> {
         bytes: escPosBytes,
         useDirectString: true, // Use string method
         textSize: 0, // Minimal text size
+        paperWidth: _paperWidth, // Use configurable paper width
       );
 
       setState(() {
