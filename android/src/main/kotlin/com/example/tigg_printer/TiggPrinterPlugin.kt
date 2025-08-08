@@ -552,12 +552,35 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
     }
 
-    private fun createMinimalEscPosBitmap(escPosString: String,paperSize: Int): Bitmap? {
+    private fun createMinimalEscPosBitmap(escPosString: String, paperSize: Int): Bitmap? {
         return try {
-            // Parse the ESC/POS string and create a bitmap that represents the formatted content
-            // This approach avoids the default header while still processing ESC/POS commands
+            Log.d("TiggPrinter", "Creating ESC/POS bitmap, paperSize: $paperSize, dataLength: ${escPosString.length}")
             
-            val paperWidth = paperSize // 58mm paper width
+            // Extract simple text content from ESC/POS data
+            val textContent = extractSimpleTextFromEscPos(escPosString)
+            
+            if (textContent.isBlank()) {
+                Log.w("TiggPrinter", "No printable text found in ESC/POS data")
+                // Create a simple test bitmap to ensure something prints
+                val bitmap = Bitmap.createBitmap(paperSize, 100, Bitmap.Config.ARGB_8888)
+                val canvas = Canvas(bitmap)
+                canvas.drawColor(Color.WHITE)
+                
+                val paint = Paint().apply {
+                    color = Color.BLACK
+                    textSize = 20.0f
+                    typeface = Typeface.MONOSPACE
+                }
+                canvas.drawText("ESC/POS Data Received", 8f, 30f, paint)
+                canvas.drawText("${escPosString.length} bytes", 8f, 60f, paint)
+                
+                Log.d("TiggPrinter", "Created fallback bitmap: ${paperSize}x100")
+                return bitmap
+            }
+            
+            // Create bitmap with extracted text
+            val lines = textContent.split('\n').filter { it.isNotBlank() }
+            
             val paint = Paint().apply {
                 color = Color.BLACK
                 textSize = 24.0f
@@ -565,134 +588,77 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 isAntiAlias = true
             }
             
-            // Parse ESC/POS commands and extract text content
-            val lines = parseEscPosContent(escPosString, paint)
+            val lineHeight = paint.textSize * 1.3f
+            val totalHeight = (lines.size * lineHeight + 40).toInt()
             
-            if (lines.isEmpty()) {
-                Log.w("TiggPrinter", "No content extracted from ESC/POS data")
-                // Create minimal bitmap if no content
-                return Bitmap.createBitmap(paperWidth, 50, Bitmap.Config.ARGB_8888).apply {
-                    eraseColor(Color.WHITE)
-                }
-            }
-            
-            // Calculate total height needed
-            val lineHeight = paint.textSize * 1.2f
-            val totalHeight = (lines.size * lineHeight + 40).toInt() // Extra padding
-            
-            // Create bitmap
-            val bitmap = Bitmap.createBitmap(paperWidth, totalHeight, Bitmap.Config.ARGB_8888)
+            val bitmap = Bitmap.createBitmap(paperSize, totalHeight, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bitmap)
-            canvas.drawColor(Color.WHITE) // White background
+            canvas.drawColor(Color.WHITE)
             
-            // Draw each line with its formatting
+            // Draw each line
             var y = lineHeight
             for (line in lines) {
-                // Apply line-specific formatting
-                when (line.alignment) {
-                    1 -> { // Center
-                        val textWidth = paint.measureText(line.text)
-                        val x = (paperWidth - textWidth) / 2
-                        canvas.drawText(line.text, x, y, paint)
-                    }
-                    2 -> { // Right
-                        val textWidth = paint.measureText(line.text)
-                        val x = paperWidth - textWidth - 8
-                        canvas.drawText(line.text, x, y, paint)
-                    }
-                    else -> { // Left (default)
-                        canvas.drawText(line.text, 8f, y, paint)
-                    }
-                }
+                canvas.drawText(line, 8f, y, paint)
                 y += lineHeight
             }
             
-            Log.d("TiggPrinter", "Created ESC/POS bitmap with ${lines.size} lines, size: ${paperWidth}x${totalHeight}")
+            Log.d("TiggPrinter", "Created ESC/POS bitmap: ${paperSize}x${totalHeight}, ${lines.size} lines")
             bitmap
             
         } catch (e: Exception) {
             Log.e("TiggPrinter", "Error creating ESC/POS bitmap: ${e.message}", e)
-            null
+            
+            // Create emergency fallback bitmap
+            try {
+                val bitmap = Bitmap.createBitmap(paperSize, 50, Bitmap.Config.ARGB_8888)
+                bitmap.eraseColor(Color.WHITE)
+                Log.w("TiggPrinter", "Created emergency fallback bitmap")
+                bitmap
+            } catch (fallbackError: Exception) {
+                Log.e("TiggPrinter", "Failed to create fallback bitmap: ${fallbackError.message}")
+                null
+            }
         }
     }
     
-    private data class EscPosLine(
-        val text: String,
-        val alignment: Int = 0, // 0=left, 1=center, 2=right
-        val bold: Boolean = false,
-        val doubleSize: Boolean = false
-    )
-    
-    private fun parseEscPosContent(escPosString: String, paint: Paint): List<EscPosLine> {
-        val lines = mutableListOf<EscPosLine>()
+    private fun extractSimpleTextFromEscPos(escPosString: String): String {
+        val result = StringBuilder()
         val bytes = escPosString.toByteArray(Charsets.ISO_8859_1)
         
         var i = 0
-        var currentAlignment = 0
-        var currentBold = false
-        var currentDoubleSize = false
-        val textBuffer = StringBuilder()
-        
         while (i < bytes.size) {
             val byte = bytes[i].toInt() and 0xFF
             
             when (byte) {
-                0x1B -> { // ESC command
+                0x1B, 0x1D -> { // ESC or GS commands - skip them
+                    // Skip command and its parameters
                     if (i + 1 < bytes.size) {
-                        when (bytes[i + 1].toInt() and 0xFF) {
-                            0x61 -> { // ESC a - Alignment
-                                if (i + 2 < bytes.size) {
-                                    // Flush current text if any
-                                    if (textBuffer.isNotEmpty()) {
-                                        lines.add(EscPosLine(textBuffer.toString(), currentAlignment, currentBold, currentDoubleSize))
-                                        textBuffer.clear()
-                                    }
-                                    currentAlignment = bytes[i + 2].toInt() and 0xFF
-                                    i += 3
-                                    continue
-                                }
+                        val cmd = bytes[i + 1].toInt() and 0xFF
+                        when (cmd) {
+                            0x40, 0x61, 0x45, 0x21 -> { // Commands with 1 parameter
+                                i += if (i + 2 < bytes.size) 3 else 2
                             }
-                            0x45 -> { // ESC E - Bold
-                                if (i + 2 < bytes.size) {
-                                    currentBold = (bytes[i + 2].toInt() and 0xFF) == 1
-                                    i += 3
-                                    continue
-                                }
-                            }
+                            else -> i += 2 // Skip command
                         }
-                    }
-                }
-                0x1D -> { // GS command
-                    if (i + 1 < bytes.size && (bytes[i + 1].toInt() and 0xFF) == 0x21) { // GS !
-                        if (i + 2 < bytes.size) {
-                            val sizeCmd = bytes[i + 2].toInt() and 0xFF
-                            currentDoubleSize = (sizeCmd and 0x11) != 0 // Check for double width/height
-                            i += 3
-                            continue
-                        }
+                    } else {
+                        i++
                     }
                 }
                 0x0A -> { // Line feed
-                    if (textBuffer.isNotEmpty()) {
-                        lines.add(EscPosLine(textBuffer.toString(), currentAlignment, currentBold, currentDoubleSize))
-                        textBuffer.clear()
-                    }
+                    result.append('\n')
+                    i++
                 }
-                else -> {
-                    // Regular printable character
-                    if (byte >= 0x20 && byte <= 0x7E) { // Printable ASCII
-                        textBuffer.append(byte.toChar())
-                    }
+                0x0D -> { // Carriage return
+                    i++ // Skip
                 }
+                in 0x20..0x7E -> { // Printable ASCII
+                    result.append(byte.toChar())
+                    i++
+                }
+                else -> i++ // Skip non-printable
             }
-            i++
         }
         
-        // Add any remaining text
-        if (textBuffer.isNotEmpty()) {
-            lines.add(EscPosLine(textBuffer.toString(), currentAlignment, currentBold, currentDoubleSize))
-        }
-        
-        return lines
+        return result.toString()
     }
 }
