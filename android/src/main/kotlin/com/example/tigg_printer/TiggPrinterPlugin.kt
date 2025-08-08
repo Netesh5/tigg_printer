@@ -590,9 +590,9 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
             
             // Calculate total height needed
-            val baseTextSize = 14.0f // Reduced for better fitting
-            val lineSpacing = 1.2f // Reduced spacing
-            var totalHeight = 15f // Top padding
+            val baseTextSize = 10.0f // Much smaller for better fitting
+            val lineSpacing = 1.1f // Even tighter spacing
+            var totalHeight = 10f // Top padding
             
             for (line in formattedLines) {
                 val textSize = when {
@@ -626,7 +626,8 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     val wrappedLines = wrapText(line.text, paint, paperSize - 12f) // 6px padding each side
                     
                     for (wrappedLine in wrappedLines) {
-                        val x = when (line.alignment) {
+                        if (wrappedLine.isNotBlank()) { // Extra check to prevent empty lines
+                            val x = when (line.alignment) {
                             1 -> { // Center
                                 val textWidth = paint.measureText(wrappedLine)
                                 (paperSize - textWidth) / 2f
@@ -636,10 +637,11 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                                 paperSize - textWidth - 6f
                             }
                             else -> 6f // Left
+                            }
+                            
+                            canvas.drawText(wrappedLine, x, y, paint)
+                            y += paint.textSize * lineSpacing
                         }
-                        
-                        canvas.drawText(wrappedLine, x, y, paint)
-                        y += paint.textSize * lineSpacing
                     }
                 } else {
                     // Empty line - add spacing
@@ -820,7 +822,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
     
     private fun wrapText(text: String, paint: Paint, maxWidth: Float): List<String> {
-        if (text.isEmpty()) return listOf("")
+        if (text.isEmpty()) return emptyList() // Return empty list instead of list with empty string
         
         val words = text.split(" ")
         val lines = mutableListOf<String>()
@@ -843,7 +845,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             lines.add(currentLine.toString())
         }
         
-        return if (lines.isEmpty()) listOf("") else lines
+        return if (lines.isEmpty()) emptyList() else lines // Return empty list if no lines
     }
     
     private fun extractSimpleTextFromEscPos(escPosString: String): String {
