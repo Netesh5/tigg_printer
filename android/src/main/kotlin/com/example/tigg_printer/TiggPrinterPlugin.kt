@@ -586,7 +586,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 if (simpleText.isNotEmpty()) {
                     // Create formatted lines with proper text width calculation
                     val testPaint = Paint().apply {
-                        textSize = 16.0f // Use 16px font for calculation
+                        textSize = 24.0f // Use 24px font for calculation
                         typeface = Typeface.MONOSPACE
                     }
                     val maxLineWidth = paperSize - 12f // 6px margin each side
@@ -612,9 +612,9 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             Log.d("TiggPrinter", "Using main rendering path with ${formattedLines.size} lines")
             
             // Calculate total height needed
-            val baseTextSize = 16.0f // Sweet spot for readability and fitting
+            val baseTextSize = 24.0f // Good readable size
             Log.d("TiggPrinter", "*** USING READABLE FONT SIZE: ${baseTextSize}px ***")
-            val lineSpacing = 1.1f // Even tighter spacing
+            val lineSpacing = 1.2f // Slightly more spacing for larger font
             var totalHeight = 10f // Top padding
             
             for (line in formattedLines) {
@@ -638,31 +638,43 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     val paint = Paint().apply {
                         color = Color.BLACK
                         textSize = when {
-                            line.isDoubleSize -> baseTextSize * 1.5f
+                            line.isDoubleSize -> baseTextSize * 1.8f // Make double size more pronounced
                             else -> baseTextSize
                         }
-                        typeface = if (line.isBold) Typeface.DEFAULT_BOLD else Typeface.MONOSPACE
+                        typeface = if (line.isBold) {
+                            Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+                        } else {
+                            Typeface.MONOSPACE
+                        }
                         isAntiAlias = true
+                        isFakeBoldText = line.isBold // Extra bold effect
                     }
                     
+                    Log.d("TiggPrinter", "Rendering line: '${line.text}' - align=${line.alignment}, bold=${line.isBold}, double=${line.isDoubleSize}, textSize=${paint.textSize}")
+                    
                     // Wrap text to fit paper width with better margins
-                    val wrappedLines = wrapText(line.text, paint, paperSize - 12f) // 6px padding each side
+                    val wrappedLines = wrapText(line.text, paint, paperSize - 20f) // More margin for alignment
                     
                     for (wrappedLine in wrappedLines) {
                         // Extra aggressive dot filtering and empty line prevention
                         val cleanLine = wrappedLine.replace(".", "").replace(Regex("\\s+"), " ").trim()
                         if (cleanLine.isNotBlank() && cleanLine.length > 1) { // Only lines with actual content
-                            Log.d("TiggPrinter", "Drawing line: '$cleanLine' at y=$y")
+                            val textWidth = paint.measureText(cleanLine)
                             val x = when (line.alignment) {
                             1 -> { // Center
-                                val textWidth = paint.measureText(cleanLine) // Use cleanLine for measurement
-                                (paperSize - textWidth) / 2f
+                                val centerX = (paperSize - textWidth) / 2f
+                                Log.d("TiggPrinter", "CENTER: text='$cleanLine', width=$textWidth, paperSize=$paperSize, x=$centerX")
+                                maxOf(0f, centerX) // Ensure not negative
                             }
                             2 -> { // Right
-                                val textWidth = paint.measureText(cleanLine) // Use cleanLine for measurement
-                                paperSize - textWidth - 6f
+                                val rightX = paperSize - textWidth - 10f // More margin for right align
+                                Log.d("TiggPrinter", "RIGHT: text='$cleanLine', width=$textWidth, paperSize=$paperSize, x=$rightX")
+                                maxOf(0f, rightX) // Ensure not negative
                             }
-                            else -> 6f // Left
+                            else -> { // Left
+                                Log.d("TiggPrinter", "LEFT: text='$cleanLine', width=$textWidth, x=10")
+                                10f // Left margin
+                            }
                             }
                             
                             canvas.drawText(cleanLine, x, y, paint)
@@ -690,7 +702,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 
                 val paint = Paint().apply {
                     color = Color.BLACK
-                    textSize = 16.0f // Match main font size for consistency
+                    textSize = 24.0f // Match main font size for consistency
                     typeface = Typeface.MONOSPACE
                     isAntiAlias = true
                 }
@@ -747,14 +759,21 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         var currentDoubleSize = false
         val textBuffer = StringBuilder()
         
+        Log.d("TiggPrinter", "Parsing ESC/POS data, total bytes: ${bytes.size}")
+        
         while (i < bytes.size) {
             val byte = bytes[i].toInt() and 0xFF
             
             when (byte) {
                 0x1B -> { // ESC command
                     if (i + 1 < bytes.size) {
-                        when (bytes[i + 1].toInt() and 0xFF) {
+                        val cmd = bytes[i + 1].toInt() and 0xFF
+                        when (cmd) {
                             0x40 -> { // ESC @ - Initialize printer
+                                Log.d("TiggPrinter", "ESC @ - Initialize printer")
+                                currentAlignment = 0
+                                currentBold = false
+                                currentDoubleSize = false
                                 i += 2
                                 continue
                             }
@@ -762,44 +781,67 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                                 if (i + 2 < bytes.size) {
                                     // Flush current text if any
                                     if (textBuffer.isNotEmpty()) {
-                                        lines.add(FormattedLine(textBuffer.toString().trim(), currentAlignment, currentBold, currentDoubleSize))
+                                        val lineText = textBuffer.toString().trim()
+                                        if (lineText.isNotEmpty() && lineText.length > 1) {
+                                            lines.add(FormattedLine(lineText, currentAlignment, currentBold, currentDoubleSize))
+                                            Log.d("TiggPrinter", "Flushed before alignment: '$lineText' (align=$currentAlignment)")
+                                        }
                                         textBuffer.clear()
                                     }
                                     currentAlignment = bytes[i + 2].toInt() and 0xFF
+                                    Log.d("TiggPrinter", "ESC a - Set alignment to: $currentAlignment")
                                     i += 3
                                     continue
                                 }
                             }
-                            0x45 -> { // ESC E - Bold
+                            0x45 -> { // ESC E - Bold on
                                 if (i + 2 < bytes.size) {
-                                    currentBold = (bytes[i + 2].toInt() and 0xFF) == 1
+                                    currentBold = (bytes[i + 2].toInt() and 0xFF) != 0
+                                    Log.d("TiggPrinter", "ESC E - Bold: $currentBold")
                                     i += 3
                                     continue
+                                } else {
+                                    currentBold = true
+                                    Log.d("TiggPrinter", "ESC E - Bold on (no param)")
+                                    i += 2
+                                    continue
                                 }
+                            }
+                            0x46 -> { // ESC F - Bold off
+                                currentBold = false
+                                Log.d("TiggPrinter", "ESC F - Bold off")
+                                i += 2
+                                continue
                             }
                         }
                     }
                     // Skip unrecognized ESC commands
+                    Log.d("TiggPrinter", "Skipping unrecognized ESC command: ${if (i + 1 < bytes.size) bytes[i + 1].toInt() and 0xFF else "none"}")
                     i += if (i + 1 < bytes.size) 2 else 1
                 }
                 0x1D -> { // GS command
                     if (i + 1 < bytes.size) {
-                        when (bytes[i + 1].toInt() and 0xFF) {
+                        val cmd = bytes[i + 1].toInt() and 0xFF
+                        when (cmd) {
                             0x21 -> { // GS ! - Character size
                                 if (i + 2 < bytes.size) {
                                     val sizeCmd = bytes[i + 2].toInt() and 0xFF
+                                    // Check for double height (bit 4) and double width (bit 0)
                                     currentDoubleSize = (sizeCmd and 0x11) != 0
+                                    Log.d("TiggPrinter", "GS ! - Size command: 0x${sizeCmd.toString(16)}, double size: $currentDoubleSize")
                                     i += 3
                                     continue
                                 }
                             }
                             0x56 -> { // GS V - Cut paper
+                                Log.d("TiggPrinter", "GS V - Cut paper command")
                                 i += if (i + 3 < bytes.size) 4 else 2
                                 continue
                             }
                         }
                     }
                     // Skip unrecognized GS commands
+                    Log.d("TiggPrinter", "Skipping unrecognized GS command: ${if (i + 1 < bytes.size) bytes[i + 1].toInt() and 0xFF else "none"}")
                     i += if (i + 1 < bytes.size) 2 else 1
                 }
                 0x0A -> { // Line feed
@@ -807,9 +849,9 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     // Only add lines with meaningful content (no just dots or spaces)
                     if (lineText.isNotEmpty() && lineText != "." && lineText.length > 1) {
                         lines.add(FormattedLine(lineText, currentAlignment, currentBold, currentDoubleSize))
-                        Log.d("TiggPrinter", "Added line: '$lineText'")
+                        Log.d("TiggPrinter", "Added line: '$lineText' (align=$currentAlignment, bold=$currentBold, double=$currentDoubleSize)")
                     } else if (lineText.isNotEmpty()) {
-                        Log.d("TiggPrinter", "Skipped line: '$lineText' (too short or just dots)")
+                        Log.d("TiggPrinter", "Skipped line: '$lineText' (filtered out)")
                     }
                     textBuffer.clear()
                     i++
@@ -822,7 +864,10 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     i++
                 }
                 else -> {
-                    // Skip non-printable characters
+                    // Skip non-printable characters but log for debugging
+                    if (byte != 0) { // Don't log null bytes
+                        Log.d("TiggPrinter", "Skipping non-printable byte: 0x${byte.toString(16)}")
+                    }
                     i++
                 }
             }
@@ -833,10 +878,11 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             val lineText = textBuffer.toString().trim()
             if (lineText.isNotEmpty() && lineText != "." && lineText.length > 1) {
                 lines.add(FormattedLine(lineText, currentAlignment, currentBold, currentDoubleSize))
-                Log.d("TiggPrinter", "Added final line: '$lineText'")
+                Log.d("TiggPrinter", "Added final line: '$lineText' (align=$currentAlignment, bold=$currentBold, double=$currentDoubleSize)")
             }
         }
         
+        Log.d("TiggPrinter", "ESC/POS parsing complete. Found ${lines.size} formatted lines")
         return lines.filter { it.text.isNotEmpty() } // Only keep lines with actual content
     }
     
