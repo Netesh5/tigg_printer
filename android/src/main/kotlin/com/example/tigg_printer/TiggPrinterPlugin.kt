@@ -590,7 +590,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
             
             // Calculate total height needed
-            val baseTextSize = 20.0f
+            val baseTextSize = 16.0f
             val lineSpacing = 1.3f
             var totalHeight = 20f // Top padding
             
