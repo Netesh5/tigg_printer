@@ -395,6 +395,64 @@ class _MyAppState extends State<MyApp> {
     }
   }
 
+  // ✅ CORRECT WAY: Handle ESC/POS data from esc_pos_utils_plus
+  Future<void> _printEscPosFromPackage() async {
+    setState(() {
+      _isPrinting = true;
+      _printStatus = 'Printing ESC/POS from esc_pos_utils_plus...';
+    });
+
+    try {
+      await TiggPrinter.bindService();
+
+      // Example: If you get List<int> from esc_pos_utils_plus
+      List<int> escPosBytes = [
+        // Your ESC/POS data from esc_pos_utils_plus package
+        // Example data with proper formatting
+        0x1B, 0x40, // ESC @ - Initialize printer
+        0x1B, 0x61, 0x01, // ESC a 1 - Center align
+        0x1D, 0x21, 0x11, // GS ! 17 - Double height and width
+        // Text: "RECEIPT"
+        0x52, 0x45, 0x43, 0x45, 0x49, 0x50, 0x54,
+        0x0A, 0x0A, // Line feeds
+        0x1B, 0x61, 0x00, // ESC a 0 - Left align
+        0x1D, 0x21, 0x00, // GS ! 0 - Normal size
+        // Text: "Item: Coffee      $5.00"
+        0x49, 0x74, 0x65, 0x6D, 0x3A, 0x20, 0x43, 0x6F, 0x66, 0x66, 0x65, 0x65,
+        0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x24, 0x35, 0x2E, 0x30, 0x30,
+        0x0A, // Line feed
+        // Text: "Total:           $5.00"
+        0x54, 0x6F, 0x74, 0x61, 0x6C, 0x3A, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
+        0x20, 0x20, 0x20, 0x20, 0x20, 0x24, 0x35, 0x2E, 0x30, 0x30,
+        0x0A, 0x0A, 0x0A, // Line feeds for spacing
+      ];
+
+      // ✅ Method 1: Bitmap method (no header, all formatting preserved)
+      final result = await TiggPrinter.printRawBytes(
+        bytes: escPosBytes,
+        useDirectString: false, // Use bitmap method
+        paperWidth: _paperWidth,
+      );
+
+      setState(() {
+        _printStatus =
+            'Success: ${result.message}\n\n✅ ESC/POS data printed correctly!\n🎯 All formatting and alignment preserved!';
+      });
+    } on TiggPrinterException catch (e) {
+      setState(() {
+        _printStatus = 'Printer Error (${e.code}): ${e.message}';
+      });
+    } catch (e) {
+      setState(() {
+        _printStatus = 'Error: $e';
+      });
+    } finally {
+      setState(() {
+        _isPrinting = false;
+      });
+    }
+  }
+
   Future<void> _checkPrinterAvailability() async {
     setState(() {
       _isPrinting = true;
@@ -730,6 +788,22 @@ class _MyAppState extends State<MyApp> {
                   ),
                   child: const Text(
                     'Print ESC/POS (String Method)',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                ),
+                const SizedBox(height: 5),
+                ElevatedButton(
+                  onPressed: _isPrinting
+                      ? null
+                      : () {
+                          print('Print ESC/POS Package Data button tapped');
+                          _printEscPosFromPackage();
+                        },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                  ),
+                  child: const Text(
+                    '✅ Correct ESC/POS Method',
                     style: TextStyle(color: Colors.white),
                   ),
                 ),
