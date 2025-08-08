@@ -73,6 +73,7 @@ abstract class TiggPrinterPlatform extends PlatformInterface {
     required List<int> bytes,
     bool useDirectString = false,
     int textSize = 0,
+    int paperWidth = 384,
   }) {
     throw UnimplementedError('printRawBytes() has not been implemented.');
   }

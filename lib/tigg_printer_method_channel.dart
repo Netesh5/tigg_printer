@@ -133,6 +133,7 @@ class MethodChannelTiggPrinter extends TiggPrinterPlatform {
     required List<int> bytes,
     bool useDirectString = false,
     int textSize = 0,
+    int paperWidth = 384,
   }) async {
     // Input validation
     if (bytes.isEmpty) {
@@ -157,6 +158,7 @@ class MethodChannelTiggPrinter extends TiggPrinterPlatform {
         'bytes': bytes,
         'useDirectString': useDirectString,
         'textSize': textSize,
+        'paperWidth': paperWidth,
       });
 
       // Handle both Map and String responses

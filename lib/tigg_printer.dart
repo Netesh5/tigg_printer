@@ -126,6 +126,7 @@ class TiggPrinter {
     required List<int> bytes,
     bool useDirectString = false,
     int textSize = 0,
+    int paperWidth = 384,
   }) async {
     // Check service connection before printing
     try {
@@ -148,6 +149,7 @@ class TiggPrinter {
       bytes: bytes,
       useDirectString: useDirectString,
       textSize: textSize,
+      paperWidth: paperWidth,
     );
   }
 

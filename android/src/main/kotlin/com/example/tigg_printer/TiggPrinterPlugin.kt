@@ -362,9 +362,16 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 val bytes = call.argument<List<Int>>("bytes")
                 val useDirectString = call.argument<Boolean>("useDirectString") ?: false
                 val textSize = call.argument<Int>("textSize") ?: 0
+                val paperWidth = call.argument<Int>("paperWidth") ?: 384 // Default to 58mm paper
 
                 if (bytes.isNullOrEmpty()) {
                     result.error("INVALID_INPUT", "Bytes array is required", null)
+                    return
+                }
+
+                // Validate paper width
+                if (paperWidth <= 0 || paperWidth > 1000) {
+                    result.error("INVALID_INPUT", "Paper width must be between 1 and 1000 pixels", null)
                     return
                 }
 
@@ -424,7 +431,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                         })
                     } else {
                         // Method 2: Create minimal bitmap to avoid default header
-                        val rawBitmap = createMinimalEscPosBitmap(escPosString)
+                        val rawBitmap = createMinimalEscPosBitmap(escPosString,paperWidth)
                         if (rawBitmap == null) {
                             result.error("RAW_DATA_ERROR", "Could not process ESC/POS data", null)
                             return
@@ -545,20 +552,147 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
     }
 
-    private fun createMinimalEscPosBitmap(escPosString: String): Bitmap? {
+    private fun createMinimalEscPosBitmap(escPosString: String,paperSize: Int): Bitmap? {
         return try {
-            // Create a minimal transparent bitmap that just carries the ESC/POS data
-            // The goal is to use the bitmap method to avoid default headers
-            val bitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(bitmap)
-            canvas.drawColor(Color.TRANSPARENT) // Transparent background
+            // Parse the ESC/POS string and create a bitmap that represents the formatted content
+            // This approach avoids the default header while still processing ESC/POS commands
             
-            Log.d("TiggPrinter", "Created minimal ESC/POS bitmap carrier")
+            val paperWidth = paperSize // 58mm paper width
+            val paint = Paint().apply {
+                color = Color.BLACK
+                textSize = 24.0f
+                typeface = Typeface.MONOSPACE
+                isAntiAlias = true
+            }
+            
+            // Parse ESC/POS commands and extract text content
+            val lines = parseEscPosContent(escPosString, paint)
+            
+            if (lines.isEmpty()) {
+                Log.w("TiggPrinter", "No content extracted from ESC/POS data")
+                // Create minimal bitmap if no content
+                return Bitmap.createBitmap(paperWidth, 50, Bitmap.Config.ARGB_8888).apply {
+                    eraseColor(Color.WHITE)
+                }
+            }
+            
+            // Calculate total height needed
+            val lineHeight = paint.textSize * 1.2f
+            val totalHeight = (lines.size * lineHeight + 40).toInt() // Extra padding
+            
+            // Create bitmap
+            val bitmap = Bitmap.createBitmap(paperWidth, totalHeight, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            canvas.drawColor(Color.WHITE) // White background
+            
+            // Draw each line with its formatting
+            var y = lineHeight
+            for (line in lines) {
+                // Apply line-specific formatting
+                when (line.alignment) {
+                    1 -> { // Center
+                        val textWidth = paint.measureText(line.text)
+                        val x = (paperWidth - textWidth) / 2
+                        canvas.drawText(line.text, x, y, paint)
+                    }
+                    2 -> { // Right
+                        val textWidth = paint.measureText(line.text)
+                        val x = paperWidth - textWidth - 8
+                        canvas.drawText(line.text, x, y, paint)
+                    }
+                    else -> { // Left (default)
+                        canvas.drawText(line.text, 8f, y, paint)
+                    }
+                }
+                y += lineHeight
+            }
+            
+            Log.d("TiggPrinter", "Created ESC/POS bitmap with ${lines.size} lines, size: ${paperWidth}x${totalHeight}")
             bitmap
             
         } catch (e: Exception) {
-            Log.e("TiggPrinter", "Error creating minimal ESC/POS bitmap: ${e.message}", e)
+            Log.e("TiggPrinter", "Error creating ESC/POS bitmap: ${e.message}", e)
             null
         }
+    }
+    
+    private data class EscPosLine(
+        val text: String,
+        val alignment: Int = 0, // 0=left, 1=center, 2=right
+        val bold: Boolean = false,
+        val doubleSize: Boolean = false
+    )
+    
+    private fun parseEscPosContent(escPosString: String, paint: Paint): List<EscPosLine> {
+        val lines = mutableListOf<EscPosLine>()
+        val bytes = escPosString.toByteArray(Charsets.ISO_8859_1)
+        
+        var i = 0
+        var currentAlignment = 0
+        var currentBold = false
+        var currentDoubleSize = false
+        val textBuffer = StringBuilder()
+        
+        while (i < bytes.size) {
+            val byte = bytes[i].toInt() and 0xFF
+            
+            when (byte) {
+                0x1B -> { // ESC command
+                    if (i + 1 < bytes.size) {
+                        when (bytes[i + 1].toInt() and 0xFF) {
+                            0x61 -> { // ESC a - Alignment
+                                if (i + 2 < bytes.size) {
+                                    // Flush current text if any
+                                    if (textBuffer.isNotEmpty()) {
+                                        lines.add(EscPosLine(textBuffer.toString(), currentAlignment, currentBold, currentDoubleSize))
+                                        textBuffer.clear()
+                                    }
+                                    currentAlignment = bytes[i + 2].toInt() and 0xFF
+                                    i += 3
+                                    continue
+                                }
+                            }
+                            0x45 -> { // ESC E - Bold
+                                if (i + 2 < bytes.size) {
+                                    currentBold = (bytes[i + 2].toInt() and 0xFF) == 1
+                                    i += 3
+                                    continue
+                                }
+                            }
+                        }
+                    }
+                }
+                0x1D -> { // GS command
+                    if (i + 1 < bytes.size && (bytes[i + 1].toInt() and 0xFF) == 0x21) { // GS !
+                        if (i + 2 < bytes.size) {
+                            val sizeCmd = bytes[i + 2].toInt() and 0xFF
+                            currentDoubleSize = (sizeCmd and 0x11) != 0 // Check for double width/height
+                            i += 3
+                            continue
+                        }
+                    }
+                }
+                0x0A -> { // Line feed
+                    if (textBuffer.isNotEmpty()) {
+                        lines.add(EscPosLine(textBuffer.toString(), currentAlignment, currentBold, currentDoubleSize))
+                        textBuffer.clear()
+                    }
+                }
+                else -> {
+                    // Regular printable character
+                    if (byte >= 0x20 && byte <= 0x7E) { // Printable ASCII
+                        textBuffer.append(byte.toChar())
+                    }
+                }
+            }
+            i++
+        }
+        
+        // Add any remaining text
+        if (textBuffer.isNotEmpty()) {
+            lines.add(EscPosLine(textBuffer.toString(), currentAlignment, currentBold, currentDoubleSize))
+        }
+        
+        return lines
     }
 }
