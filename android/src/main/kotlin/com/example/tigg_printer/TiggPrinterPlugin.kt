@@ -557,8 +557,18 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         return try {
             Log.d("TiggPrinter", "Creating ESC/POS bitmap, paperSize: $paperSize, dataLength: ${escPosString.length}")
             
+            // Log the raw bytes for debugging
+            val bytes = escPosString.toByteArray(Charsets.ISO_8859_1)
+            val hexString = bytes.take(50).joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
+            Log.d("TiggPrinter", "First 50 bytes: $hexString")
+            
             // Parse ESC/POS commands and extract formatted content
             val formattedLines = parseEscPosWithFormatting(escPosString, paperSize)
+            Log.d("TiggPrinter", "Parsed ${formattedLines.size} formatted lines")
+            
+            for ((index, line) in formattedLines.withIndex()) {
+                Log.d("TiggPrinter", "Line $index: '${line.text}' (align=${line.alignment}, bold=${line.isBold}, double=${line.isDoubleSize})")
+            }
             
             if (formattedLines.isEmpty()) {
                 Log.w("TiggPrinter", "No content extracted from ESC/POS data")
@@ -643,11 +653,58 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         } catch (e: Exception) {
             Log.e("TiggPrinter", "Error creating ESC/POS bitmap: ${e.message}", e)
             
-            // Create emergency fallback bitmap
+            // Create emergency fallback that definitely works
             try {
-                val bitmap = Bitmap.createBitmap(paperSize, 50, Bitmap.Config.ARGB_8888)
-                bitmap.eraseColor(Color.WHITE)
-                Log.w("TiggPrinter", "Created emergency fallback bitmap")
+                Log.d("TiggPrinter", "Creating emergency fallback bitmap")
+                val bitmap = Bitmap.createBitmap(paperSize, 200, Bitmap.Config.ARGB_8888)
+                val canvas = Canvas(bitmap)
+                canvas.drawColor(Color.WHITE)
+                
+                val paint = Paint().apply {
+                    color = Color.BLACK
+                    textSize = 24.0f
+                    typeface = Typeface.MONOSPACE
+                    isAntiAlias = true
+                }
+                
+                // Extract just printable text as simple fallback
+                val simpleText = escPosString.toByteArray(Charsets.ISO_8859_1)
+                    .filter { (it.toInt() and 0xFF) in 32..126 }
+                    .map { it.toInt().toChar() }
+                    .joinToString("")
+                    .replace(Regex("\\s+"), " ")
+                    .trim()
+                
+                Log.d("TiggPrinter", "Fallback extracted text: '$simpleText'")
+                
+                if (simpleText.isNotEmpty()) {
+                    // Split into lines that fit
+                    val maxCharsPerLine = (paperSize / (paint.textSize * 0.6)).toInt()
+                    val words = simpleText.split(" ")
+                    val lines = mutableListOf<String>()
+                    var currentLine = ""
+                    
+                    for (word in words) {
+                        if ((currentLine + " " + word).length <= maxCharsPerLine) {
+                            currentLine = if (currentLine.isEmpty()) word else "$currentLine $word"
+                        } else {
+                            if (currentLine.isNotEmpty()) lines.add(currentLine)
+                            currentLine = word
+                        }
+                    }
+                    if (currentLine.isNotEmpty()) lines.add(currentLine)
+                    
+                    var y = 40f
+                    for (line in lines.take(6)) { // Max 6 lines
+                        canvas.drawText(line, 8f, y, paint)
+                        y += 30f
+                    }
+                } else {
+                    canvas.drawText("No readable text found", 8f, 40f, paint)
+                    canvas.drawText("Data length: ${escPosString.length}", 8f, 80f, paint)
+                }
+                
+                Log.d("TiggPrinter", "Created emergency fallback bitmap successfully")
                 bitmap
             } catch (fallbackError: Exception) {
                 Log.e("TiggPrinter", "Failed to create fallback bitmap: ${fallbackError.message}")
