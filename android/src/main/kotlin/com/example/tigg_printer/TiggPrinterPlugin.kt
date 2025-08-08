@@ -579,7 +579,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 
                 val paint = Paint().apply {
                     color = Color.BLACK
-                    textSize = 20.0f
+                    textSize = 8.0f
                     typeface = Typeface.MONOSPACE
                 }
                 canvas.drawText("ESC/POS Data Received", 8f, 30f, paint)
@@ -590,7 +590,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
             
             // Calculate total height needed
-            val baseTextSize = 10.0f // Much smaller for better fitting
+            val baseTextSize = 6.0f // Much smaller for better fitting
             val lineSpacing = 1.1f // Even tighter spacing
             var totalHeight = 10f // Top padding
             
@@ -664,17 +664,18 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 
                 val paint = Paint().apply {
                     color = Color.BLACK
-                    textSize = 24.0f
+                    textSize = 8.0f // Much smaller fallback font
                     typeface = Typeface.MONOSPACE
                     isAntiAlias = true
                 }
                 
-                // Extract just printable text as simple fallback
+                // Extract just printable text as simple fallback, filter out dots
                 val simpleText = escPosString.toByteArray(Charsets.ISO_8859_1)
                     .filter { (it.toInt() and 0xFF) in 32..126 }
                     .map { it.toInt().toChar() }
                     .joinToString("")
                     .replace(Regex("\\s+"), " ")
+                    .replace(".", "") // Remove dots that might be causing issues
                     .trim()
                 
                 Log.d("TiggPrinter", "Fallback extracted text: '$simpleText'")
@@ -789,9 +790,12 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
                 0x0A -> { // Line feed
                     val lineText = textBuffer.toString().trim()
-                    // Only add non-empty lines to prevent dots
-                    if (lineText.isNotEmpty()) {
+                    // Only add lines with meaningful content (no just dots or spaces)
+                    if (lineText.isNotEmpty() && lineText != "." && lineText.length > 1) {
                         lines.add(FormattedLine(lineText, currentAlignment, currentBold, currentDoubleSize))
+                        Log.d("TiggPrinter", "Added line: '$lineText'")
+                    } else if (lineText.isNotEmpty()) {
+                        Log.d("TiggPrinter", "Skipped line: '$lineText' (too short or just dots)")
                     }
                     textBuffer.clear()
                     i++
@@ -813,12 +817,13 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         // Add any remaining text
         if (textBuffer.isNotEmpty()) {
             val lineText = textBuffer.toString().trim()
-            if (lineText.isNotEmpty()) {
+            if (lineText.isNotEmpty() && lineText != "." && lineText.length > 1) {
                 lines.add(FormattedLine(lineText, currentAlignment, currentBold, currentDoubleSize))
+                Log.d("TiggPrinter", "Added final line: '$lineText'")
             }
         }
         
-        return lines.filter { it.text.isNotEmpty() || lines.indexOf(it) == 0 } // Keep content lines and first empty line for spacing
+        return lines.filter { it.text.isNotEmpty() } // Only keep lines with actual content
     }
     
     private fun wrapText(text: String, paint: Paint, maxWidth: Float): List<String> {
