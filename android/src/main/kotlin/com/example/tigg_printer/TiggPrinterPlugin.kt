@@ -346,6 +346,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
 
             override fun onResponse(response: Bundle?) {
+                
                 Log.d("TiggPrinter", "Print callback - onResponse: $response")
             }
         })
