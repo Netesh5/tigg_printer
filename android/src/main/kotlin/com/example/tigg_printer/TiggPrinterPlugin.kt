@@ -609,7 +609,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             Log.d("TiggPrinter", "Using main rendering path with ${formattedLines.size} lines")
             
             // Calculate total height needed
-            val baseTextSize = 16.0f // Much smaller for better fitting
+            val baseTextSize = 24.0f // Much smaller for better fitting
             Log.d("TiggPrinter", "*** USING VERY SMALL FONT SIZE: ${baseTextSize}px ***")
             val lineSpacing = 1.1f // Even tighter spacing
             var totalHeight = 10f // Top padding
@@ -687,7 +687,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 
                 val paint = Paint().apply {
                     color = Color.BLACK
-                    textSize = 6.0f // Much smaller fallback font - same as main
+                    textSize = 24.0f // Much smaller fallback font - same as main
                     typeface = Typeface.MONOSPACE
                     isAntiAlias = true
                 }
