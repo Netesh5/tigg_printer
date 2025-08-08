@@ -346,7 +346,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
 
             override fun onResponse(response: Bundle?) {
-
+                
                 Log.d("TiggPrinter", "Print callback - onResponse: $response")
             }
         })
@@ -569,7 +569,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 
                 val paint = Paint().apply {
                     color = Color.BLACK
-                    textSize = 16.0f
+                    textSize = 20.0f
                     typeface = Typeface.MONOSPACE
                 }
                 canvas.drawText("ESC/POS Data Received", 8f, 30f, paint)
@@ -584,7 +584,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             
             val paint = Paint().apply {
                 color = Color.BLACK
-                textSize = 24.0f
+                textSize = 20.0f
                 typeface = Typeface.MONOSPACE
                 isAntiAlias = true
             }
