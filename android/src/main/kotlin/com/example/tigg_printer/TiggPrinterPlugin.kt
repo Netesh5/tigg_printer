@@ -411,6 +411,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
                     if (useDirectString) {
                         // Method 1: Direct string approach (may show default header)
+                        Log.d("TiggPrinter", "*** USING STRING METHOD (may show default header) ***")
                         AppService.me().startPrinting(escPosString, textSize, object : IPaymentCallback.Stub() {
                             override fun onSuccess(success: Boolean, message: String?) {
                                 Log.d("TiggPrinter", "Raw bytes (string) print callback - onSuccess: success=$success, message=$message")
@@ -432,6 +433,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                         })
                     } else {
                         // Method 2: Create minimal bitmap to avoid default header
+                        Log.d("TiggPrinter", "*** USING BITMAP METHOD (clean, no header) ***")
                         val rawBitmap = createMinimalEscPosBitmap(escPosString,paperWidth)
                         if (rawBitmap == null) {
                             result.error("RAW_DATA_ERROR", "Could not process ESC/POS data", null)
@@ -563,7 +565,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             Log.d("TiggPrinter", "First 50 bytes: $hexString")
             
             // Parse ESC/POS commands and extract formatted content
-            val formattedLines = parseEscPosWithFormatting(escPosString, paperSize)
+            val formattedLines = parseEscPosWithFormatting(escPosString, paperSize).toMutableList()
             Log.d("TiggPrinter", "Parsed ${formattedLines.size} formatted lines")
             
             for ((index, line) in formattedLines.withIndex()) {
@@ -571,26 +573,44 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
             
             if (formattedLines.isEmpty()) {
-                Log.w("TiggPrinter", "No content extracted from ESC/POS data")
-                // Create a simple test bitmap to ensure something prints
-                val bitmap = Bitmap.createBitmap(paperSize, 100, Bitmap.Config.ARGB_8888)
-                val canvas = Canvas(bitmap)
-                canvas.drawColor(Color.WHITE)
-                
-                val paint = Paint().apply {
-                    color = Color.BLACK
-                    textSize = 8.0f
-                    typeface = Typeface.MONOSPACE
+                Log.w("TiggPrinter", "No content extracted from ESC/POS data - using simple extraction")
+                // Force simple text extraction instead of empty result
+                val simpleText = escPosString.toByteArray(Charsets.ISO_8859_1)
+                    .filter { (it.toInt() and 0xFF) in 32..126 }
+                    .map { it.toInt().toChar() }
+                    .joinToString("")
+                    .replace(Regex("[.]+"), "") // Remove dots
+                    .replace(Regex("\\s+"), " ")
+                    .trim()
+                    
+                if (simpleText.isNotEmpty()) {
+                    // Create formatted lines from simple text
+                    val words = simpleText.split(" ").filter { it.isNotEmpty() }
+                    val maxWordsPerLine = 6 // Limit words per line
+                    
+                    for (i in words.indices step maxWordsPerLine) {
+                        val lineWords = words.subList(i, minOf(i + maxWordsPerLine, words.size))
+                        val lineText = lineWords.joinToString(" ")
+                        if (lineText.isNotEmpty()) {
+                            formattedLines.add(FormattedLine(lineText, 0, false, false))
+                        }
+                    }
+                    Log.d("TiggPrinter", "Created ${formattedLines.size} lines from simple extraction")
                 }
-                canvas.drawText("ESC/POS Data Received", 8f, 30f, paint)
-                canvas.drawText("${escPosString.length} bytes", 8f, 60f, paint)
                 
-                Log.d("TiggPrinter", "Created fallback bitmap: ${paperSize}x100")
-                return bitmap
+                if (formattedLines.isEmpty()) {
+                    // Last resort - create minimal content
+                    formattedLines.add(FormattedLine("Receipt Data", 1, false, false))
+                    Log.d("TiggPrinter", "Using minimal fallback content")
+                }
             }
+            
+            // NEVER use the old fallback - always use our small font rendering
+            Log.d("TiggPrinter", "Using main rendering path with ${formattedLines.size} lines")
             
             // Calculate total height needed
             val baseTextSize = 6.0f // Much smaller for better fitting
+            Log.d("TiggPrinter", "*** USING VERY SMALL FONT SIZE: ${baseTextSize}px ***")
             val lineSpacing = 1.1f // Even tighter spacing
             var totalHeight = 10f // Top padding
             
@@ -626,7 +646,10 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     val wrappedLines = wrapText(line.text, paint, paperSize - 12f) // 6px padding each side
                     
                     for (wrappedLine in wrappedLines) {
-                        if (wrappedLine.isNotBlank()) { // Extra check to prevent empty lines
+                        // Extra aggressive dot filtering and empty line prevention
+                        val cleanLine = wrappedLine.replace(".", "").replace(Regex("\\s+"), " ").trim()
+                        if (cleanLine.isNotBlank() && cleanLine.length > 1) { // Only lines with actual content
+                            Log.d("TiggPrinter", "Drawing line: '$cleanLine' at y=$y")
                             val x = when (line.alignment) {
                             1 -> { // Center
                                 val textWidth = paint.measureText(wrappedLine)
@@ -639,7 +662,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                             else -> 6f // Left
                             }
                             
-                            canvas.drawText(wrappedLine, x, y, paint)
+                            canvas.drawText(cleanLine, x, y, paint)
                             y += paint.textSize * lineSpacing
                         }
                     }
@@ -664,7 +687,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 
                 val paint = Paint().apply {
                     color = Color.BLACK
-                    textSize = 8.0f // Much smaller fallback font
+                    textSize = 6.0f // Much smaller fallback font - same as main
                     typeface = Typeface.MONOSPACE
                     isAntiAlias = true
                 }
