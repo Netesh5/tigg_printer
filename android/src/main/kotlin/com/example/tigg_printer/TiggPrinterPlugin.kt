@@ -584,15 +584,18 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     .trim()
                     
                 if (simpleText.isNotEmpty()) {
-                    // Create formatted lines from simple text
-                    val words = simpleText.split(" ").filter { it.isNotEmpty() }
-                    val maxWordsPerLine = 6 // Limit words per line
+                    // Create formatted lines with proper text width calculation
+                    val testPaint = Paint().apply {
+                        textSize = 16.0f // Use 16px font for calculation
+                        typeface = Typeface.MONOSPACE
+                    }
+                    val maxLineWidth = paperSize - 12f // 6px margin each side
+                    val wrappedLines = wrapText(simpleText, testPaint, maxLineWidth)
                     
-                    for (i in words.indices step maxWordsPerLine) {
-                        val lineWords = words.subList(i, minOf(i + maxWordsPerLine, words.size))
-                        val lineText = lineWords.joinToString(" ")
-                        if (lineText.isNotEmpty()) {
-                            formattedLines.add(FormattedLine(lineText, 0, false, false))
+                    for (wrappedLine in wrappedLines) {
+                        val cleanLine = wrappedLine.trim()
+                        if (cleanLine.isNotEmpty()) {
+                            formattedLines.add(FormattedLine(cleanLine, 0, false, false))
                         }
                     }
                     Log.d("TiggPrinter", "Created ${formattedLines.size} lines from simple extraction")
@@ -609,8 +612,8 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             Log.d("TiggPrinter", "Using main rendering path with ${formattedLines.size} lines")
             
             // Calculate total height needed
-            val baseTextSize = 24.0f // Much smaller for better fitting
-            Log.d("TiggPrinter", "*** USING VERY SMALL FONT SIZE: ${baseTextSize}px ***")
+            val baseTextSize = 16.0f // Sweet spot for readability and fitting
+            Log.d("TiggPrinter", "*** USING READABLE FONT SIZE: ${baseTextSize}px ***")
             val lineSpacing = 1.1f // Even tighter spacing
             var totalHeight = 10f // Top padding
             
@@ -652,11 +655,11 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                             Log.d("TiggPrinter", "Drawing line: '$cleanLine' at y=$y")
                             val x = when (line.alignment) {
                             1 -> { // Center
-                                val textWidth = paint.measureText(wrappedLine)
+                                val textWidth = paint.measureText(cleanLine) // Use cleanLine for measurement
                                 (paperSize - textWidth) / 2f
                             }
                             2 -> { // Right
-                                val textWidth = paint.measureText(wrappedLine)
+                                val textWidth = paint.measureText(cleanLine) // Use cleanLine for measurement
                                 paperSize - textWidth - 6f
                             }
                             else -> 6f // Left
@@ -687,7 +690,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 
                 val paint = Paint().apply {
                     color = Color.BLACK
-                    textSize = 24.0f // Much smaller fallback font - same as main
+                    textSize = 16.0f // Match main font size for consistency
                     typeface = Typeface.MONOSPACE
                     isAntiAlias = true
                 }
@@ -704,26 +707,14 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 Log.d("TiggPrinter", "Fallback extracted text: '$simpleText'")
                 
                 if (simpleText.isNotEmpty()) {
-                    // Split into lines that fit
-                    val maxCharsPerLine = (paperSize / (paint.textSize * 0.6)).toInt()
-                    val words = simpleText.split(" ")
-                    val lines = mutableListOf<String>()
-                    var currentLine = ""
-                    
-                    for (word in words) {
-                        if ((currentLine + " " + word).length <= maxCharsPerLine) {
-                            currentLine = if (currentLine.isEmpty()) word else "$currentLine $word"
-                        } else {
-                            if (currentLine.isNotEmpty()) lines.add(currentLine)
-                            currentLine = word
-                        }
-                    }
-                    if (currentLine.isNotEmpty()) lines.add(currentLine)
+                    // Use proper text wrapping based on actual text width
+                    val maxLineWidth = paperSize - 16f // 8px margin each side
+                    val wrappedLines = wrapText(simpleText, paint, maxLineWidth)
                     
                     var y = 40f
-                    for (line in lines.take(6)) { // Max 6 lines
+                    for (line in wrappedLines.take(8)) { // Max 8 lines for fallback
                         canvas.drawText(line, 8f, y, paint)
-                        y += 30f
+                        y += paint.textSize * 1.2f
                     }
                 } else {
                     canvas.drawText("No readable text found", 8f, 40f, paint)
