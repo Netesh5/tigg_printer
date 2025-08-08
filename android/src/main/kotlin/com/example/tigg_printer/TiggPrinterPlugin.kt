@@ -579,14 +579,13 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     .filter { (it.toInt() and 0xFF) in 32..126 }
                     .map { it.toInt().toChar() }
                     .joinToString("")
-                    .replace(Regex("[.]+"), "") // Remove dots
-                    .replace(Regex("\\s+"), " ")
+                    .replace(Regex("\\s+"), " ") // Only normalize whitespace, don't remove content
                     .trim()
                     
                 if (simpleText.isNotEmpty()) {
                     // Create formatted lines with proper text width calculation
                     val testPaint = Paint().apply {
-                        textSize = 24.0f // Use 24px font for calculation
+                        textSize = 20.0f // Use 20px font for calculation
                         typeface = Typeface.MONOSPACE
                     }
                     val maxLineWidth = paperSize - 12f // 6px margin each side
@@ -612,7 +611,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             Log.d("TiggPrinter", "Using main rendering path with ${formattedLines.size} lines")
             
             // Calculate total height needed
-            val baseTextSize = 24.0f // Good readable size
+            val baseTextSize = 20.0f // Good readable size
             Log.d("TiggPrinter", "*** USING READABLE FONT SIZE: ${baseTextSize}px ***")
             val lineSpacing = 1.2f // Slightly more spacing for larger font
             var totalHeight = 10f // Top padding
@@ -634,6 +633,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             // Draw each line with proper formatting
             var y = baseTextSize * lineSpacing + 10f
             for (line in formattedLines) {
+                // Handle both empty and non-empty lines
                 if (line.text.isNotBlank()) {
                     val paint = Paint().apply {
                         color = Color.BLACK
@@ -656,9 +656,9 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     val wrappedLines = wrapText(line.text, paint, paperSize - 20f) // More margin for alignment
                     
                     for (wrappedLine in wrappedLines) {
-                        // Extra aggressive dot filtering and empty line prevention
-                        val cleanLine = wrappedLine.replace(".", "").replace(Regex("\\s+"), " ").trim()
-                        if (cleanLine.isNotBlank() && cleanLine.length > 1) { // Only lines with actual content
+                        // Don't filter out dots or content here - keep everything
+                        val cleanLine = wrappedLine.replace(Regex("\\s+"), " ").trim()
+                        if (cleanLine.isNotEmpty()) {
                             val textWidth = paint.measureText(cleanLine)
                             val x = when (line.alignment) {
                             1 -> { // Center
@@ -682,8 +682,9 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                         }
                     }
                 } else {
-                    // Empty line - add spacing
-                    y += baseTextSize * 0.5f
+                    // Empty line - add spacing but don't skip it
+                    y += baseTextSize * 0.8f // Add space for empty lines
+                    Log.d("TiggPrinter", "Added spacing for empty line")
                 }
             }
             
@@ -702,7 +703,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 
                 val paint = Paint().apply {
                     color = Color.BLACK
-                    textSize = 24.0f // Match main font size for consistency
+                    textSize = 20.0f // Match main font size for consistency
                     typeface = Typeface.MONOSPACE
                     isAntiAlias = true
                 }
@@ -846,12 +847,18 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
                 0x0A -> { // Line feed
                     val lineText = textBuffer.toString().trim()
-                    // Only add lines with meaningful content (no just dots or spaces)
-                    if (lineText.isNotEmpty() && lineText != "." && lineText.length > 1) {
-                        lines.add(FormattedLine(lineText, currentAlignment, currentBold, currentDoubleSize))
-                        Log.d("TiggPrinter", "Added line: '$lineText' (align=$currentAlignment, bold=$currentBold, double=$currentDoubleSize)")
-                    } else if (lineText.isNotEmpty()) {
-                        Log.d("TiggPrinter", "Skipped line: '$lineText' (filtered out)")
+                    // Add ALL lines, including empty ones for proper spacing
+                    if (lineText.isNotEmpty()) {
+                        // Filter out only pure dot lines, but keep everything else
+                        val cleanText = lineText.replace(Regex("^[.\\s]*$"), "").trim()
+                        if (cleanText.isNotEmpty() || lineText.contains(" ")) {
+                            lines.add(FormattedLine(lineText, currentAlignment, currentBold, currentDoubleSize))
+                            Log.d("TiggPrinter", "Added line: '$lineText' (align=$currentAlignment, bold=$currentBold, double=$currentDoubleSize)")
+                        }
+                    } else {
+                        // Add empty line for spacing
+                        lines.add(FormattedLine("", currentAlignment, currentBold, currentDoubleSize))
+                        Log.d("TiggPrinter", "Added empty line for spacing")
                     }
                     textBuffer.clear()
                     i++
@@ -876,18 +883,28 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         // Add any remaining text
         if (textBuffer.isNotEmpty()) {
             val lineText = textBuffer.toString().trim()
-            if (lineText.isNotEmpty() && lineText != "." && lineText.length > 1) {
-                lines.add(FormattedLine(lineText, currentAlignment, currentBold, currentDoubleSize))
-                Log.d("TiggPrinter", "Added final line: '$lineText' (align=$currentAlignment, bold=$currentBold, double=$currentDoubleSize)")
-            }
+            // Keep all text, don't filter aggressively
+            lines.add(FormattedLine(lineText, currentAlignment, currentBold, currentDoubleSize))
+            Log.d("TiggPrinter", "Added final line: '$lineText' (align=$currentAlignment, bold=$currentBold, double=$currentDoubleSize)")
         }
         
         Log.d("TiggPrinter", "ESC/POS parsing complete. Found ${lines.size} formatted lines")
-        return lines.filter { it.text.isNotEmpty() } // Only keep lines with actual content
+        return lines // Return all lines including empty ones
     }
     
     private fun wrapText(text: String, paint: Paint, maxWidth: Float): List<String> {
-        if (text.isEmpty()) return emptyList() // Return empty list instead of list with empty string
+        if (text.isEmpty()) return listOf("") // Return empty string for spacing, not empty list
+        
+        // Check if text looks like a table row (has multiple spaces or specific patterns)
+        val isTableLikeContent = text.contains("  ") || 
+                                 text.matches(Regex(".*\\s+\\d+\\.?\\d*\\s*")) ||
+                                 text.contains("Particular") ||
+                                 text.contains("Amount") ||
+                                 text.contains("Quantity") ||
+                                 text.contains("Rate")
+        
+        // For table-like content, be more lenient with wrapping
+        val effectiveMaxWidth = if (isTableLikeContent) maxWidth * 1.2f else maxWidth
         
         val words = text.split(" ")
         val lines = mutableListOf<String>()
@@ -897,7 +914,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             val testLine = if (currentLine.isEmpty()) word else "${currentLine} $word"
             val textWidth = paint.measureText(testLine)
             
-            if (textWidth <= maxWidth || currentLine.isEmpty()) {
+            if (textWidth <= effectiveMaxWidth || currentLine.isEmpty()) {
                 if (currentLine.isNotEmpty()) currentLine.append(" ")
                 currentLine.append(word)
             } else {
@@ -910,7 +927,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             lines.add(currentLine.toString())
         }
         
-        return if (lines.isEmpty()) emptyList() else lines // Return empty list if no lines
+        return if (lines.isEmpty()) listOf("") else lines // Always return at least one line
     }
     
     private fun extractSimpleTextFromEscPos(escPosString: String): String {
