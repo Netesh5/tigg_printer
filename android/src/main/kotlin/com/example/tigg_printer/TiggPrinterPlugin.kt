@@ -568,34 +568,108 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             val formattedLines = parseEscPosWithFormatting(escPosString, paperSize).toMutableList()
             Log.d("TiggPrinter", "Parsed ${formattedLines.size} formatted lines")
             
-            for ((index, line) in formattedLines.withIndex()) {
-                Log.d("TiggPrinter", "Line $index: '${line.text}' (align=${line.alignment}, bold=${line.isBold}, double=${line.isDoubleSize})")
+            // Process lines to detect and merge table structures
+            val processedLines = mutableListOf<FormattedLine>()
+            var i = 0
+            while (i < formattedLines.size) {
+                val currentLine = formattedLines[i]
+                
+                // Check if this line looks like a table header (Particular/Amount)
+                if (currentLine.text.trim() == "Particular8" || currentLine.text.trim() == "Particular") {
+                    // Look for Amount on next line
+                    if (i + 1 < formattedLines.size) {
+                        val nextLine = formattedLines[i + 1]
+                        if (nextLine.text.trim() == "Amount") {
+                            // Merge into table header row
+                            val tableHeader = "Particular" + " ".repeat(20) + "Amount"
+                            processedLines.add(FormattedLine(tableHeader, 0, currentLine.isBold, currentLine.isDoubleSize))
+                            Log.d("TiggPrinter", "Merged table header: '$tableHeader'")
+                            i += 2 // Skip both lines
+                            continue
+                        }
+                    }
+                }
+                
+                // Check if this line looks like a product item that should be on same line as amount
+                if (i + 3 < formattedLines.size && 
+                    !currentLine.text.contains("---") && 
+                    !currentLine.text.trim().isEmpty() &&
+                    currentLine.text.trim() != "Amount" &&
+                    currentLine.text.trim() != "Particular" &&
+                    !currentLine.text.contains("Total") &&
+                    !currentLine.text.contains("VAT") &&
+                    !currentLine.text.contains("Discount")) {
+                    
+                    // Look ahead for amount pattern (number with decimal)
+                    for (j in i + 1..minOf(i + 3, formattedLines.size - 1)) {
+                        val checkLine = formattedLines[j]
+                        if (checkLine.text.trim().matches(Regex("\\d+\\.\\d+"))) {
+                            // Found amount, merge the lines in between
+                            val productInfo = mutableListOf<String>()
+                            for (k in i until j) {
+                                val lineText = formattedLines[k].text.trim()
+                                if (lineText.isNotEmpty()) {
+                                    productInfo.add(lineText)
+                                }
+                            }
+                            val amount = checkLine.text.trim()
+                            
+                            // Create merged line with proper spacing
+                            val productText = productInfo.joinToString(" ")
+                            val spacing = maxOf(1, 25 - productText.length)
+                            val mergedLine = productText + " ".repeat(spacing) + amount
+                            
+                            processedLines.add(FormattedLine(mergedLine, 0, currentLine.isBold, currentLine.isDoubleSize))
+                            Log.d("TiggPrinter", "Merged product line: '$mergedLine'")
+                            i = j + 1 // Skip to after the amount
+                            break
+                        }
+                    }
+                    
+                    // If no amount found, add line normally
+                    if (i < formattedLines.size && formattedLines[i] == currentLine) {
+                        processedLines.add(currentLine)
+                        i++
+                    }
+                } else {
+                    // Add line normally
+                    processedLines.add(currentLine)
+                    i++
+                }
             }
             
-            if (formattedLines.isEmpty()) {
+            // Use processed lines for rendering
+            val finalLines = processedLines
+            
+            for ((index, line) in finalLines.withIndex()) {
+                Log.d("TiggPrinter", "Final Line $index: '${line.text}' (align=${line.alignment}, bold=${line.isBold}, double=${line.isDoubleSize})")
+            }
+            
+            if (finalLines.isEmpty()) {
                 Log.w("TiggPrinter", "No content extracted from ESC/POS data - using simple extraction")
                 // Create a simple fallback line to ensure something prints
-                formattedLines.add(FormattedLine("ESC/POS Data (${escPosString.length} bytes)", 1, false, false))
+                finalLines.add(FormattedLine("ESC/POS Data (${escPosString.length} bytes)", 1, false, false))
                 Log.d("TiggPrinter", "Using minimal fallback content")
             }
             
             // NEVER use the old fallback - always use our small font rendering
-            Log.d("TiggPrinter", "Using main rendering path with ${formattedLines.size} lines")
+            Log.d("TiggPrinter", "Using main rendering path with ${finalLines.size} lines")
             
             // Calculate total height needed
             val baseTextSize = 20.0f // Back to 20px as requested
             Log.d("TiggPrinter", "*** USING READABLE FONT SIZE: ${baseTextSize}px ***")
             val lineSpacing = 1.2f // Slightly more spacing for larger font
-            var totalHeight = 10f // Top padding
+            var totalHeight = 20f // Top padding (increased)
             
-            for (line in formattedLines) {
+            for (line in finalLines) {
                 val textSize = when {
                     line.isDoubleSize -> baseTextSize * 1.5f
                     else -> baseTextSize
                 }
-                totalHeight += textSize * lineSpacing
+                // Account for potential text wrapping by adding more height per line
+                totalHeight += textSize * lineSpacing * 1.5f // Extra height for potential wrapping
             }
-            totalHeight += 30f // Bottom padding
+            totalHeight += 50f // Bottom padding (increased)
             
             // Create bitmap
             val bitmap = Bitmap.createBitmap(paperSize, totalHeight.toInt(), Bitmap.Config.ARGB_8888)
@@ -603,8 +677,8 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             canvas.drawColor(Color.WHITE)
             
             // Draw each line with exact formatting - no modifications
-            var y = baseTextSize * lineSpacing + 10f
-            for (line in formattedLines) {
+            var y = baseTextSize * lineSpacing + 20f // Increased initial Y position
+            for (line in finalLines) {
                 if (line.text.isNotEmpty()) {
                     val paint = Paint().apply {
                         color = Color.BLACK
@@ -625,7 +699,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     
                     // Handle text wrapping for long text that doesn't fit
                     val textWidth = paint.measureText(line.text)
-                    val maxTextWidth = paperSize - 20f // 10px margin on each side
+                    val maxTextWidth = paperSize - 6f // 3px margin on each side (reduced from 10px)
                     
                     if (textWidth <= maxTextWidth) {
                         // Text fits on one line
@@ -633,16 +707,16 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                             1 -> { // Center alignment
                                 val centerX = (paperSize - textWidth) / 2f
                                 Log.d("TiggPrinter", "CENTER: '${line.text}' -> x=$centerX (paperSize=$paperSize, textWidth=$textWidth)")
-                                maxOf(5f, centerX) // Minimal margin
+                                maxOf(2f, centerX) // Minimal margin (reduced from 5f)
                             }
                             2 -> { // Right alignment
-                                val rightX = paperSize - textWidth - 10f
+                                val rightX = paperSize - textWidth - 3f // Reduced from 10f
                                 Log.d("TiggPrinter", "RIGHT: '${line.text}' -> x=$rightX")
-                                maxOf(5f, rightX)
+                                maxOf(2f, rightX)
                             }
                             else -> { // Left alignment
-                                Log.d("TiggPrinter", "LEFT: '${line.text}' -> x=5")
-                                5f // Minimal left margin
+                                Log.d("TiggPrinter", "LEFT: '${line.text}' -> x=2")
+                                2f // Minimal left margin (reduced from 5f)
                             }
                         }
                         
@@ -659,14 +733,14 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                             val x = when (line.alignment) {
                                 1 -> { // Center alignment
                                     val centerX = (paperSize - wrappedTextWidth) / 2f
-                                    maxOf(5f, centerX)
+                                    maxOf(2f, centerX) // Reduced margin
                                 }
                                 2 -> { // Right alignment
-                                    val rightX = paperSize - wrappedTextWidth - 10f
-                                    maxOf(5f, rightX)
+                                    val rightX = paperSize - wrappedTextWidth - 3f // Reduced margin
+                                    maxOf(2f, rightX)
                                 }
                                 else -> { // Left alignment
-                                    5f
+                                    2f // Reduced margin
                                 }
                             }
                             
@@ -682,7 +756,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
             }
             
-            Log.d("TiggPrinter", "Created ESC/POS bitmap: ${paperSize}x${totalHeight.toInt()}, ${formattedLines.size} lines")
+            Log.d("TiggPrinter", "Created ESC/POS bitmap: ${paperSize}x${totalHeight.toInt()}, ${finalLines.size} lines")
             bitmap
             
         } catch (e: Exception) {
@@ -715,17 +789,17 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 
                 if (simpleText.isNotEmpty()) {
                     // Use proper text wrapping based on actual text width
-                    val maxLineWidth = paperSize - 16f // 8px margin each side
+                    val maxLineWidth = paperSize - 6f // 3px margin each side (reduced)
                     val wrappedLines = wrapText(simpleText, paint, maxLineWidth)
                     
                     var y = 40f
                     for (line in wrappedLines.take(8)) { // Max 8 lines for fallback
-                        canvas.drawText(line, 8f, y, paint)
+                        canvas.drawText(line, 3f, y, paint) // Reduced margin
                         y += paint.textSize * 1.2f
                     }
                 } else {
-                    canvas.drawText("No readable text found", 8f, 40f, paint)
-                    canvas.drawText("Data length: ${escPosString.length}", 8f, 80f, paint)
+                    canvas.drawText("No readable text found", 3f, 40f, paint)
+                    canvas.drawText("Data length: ${escPosString.length}", 3f, 80f, paint)
                 }
                 
                 Log.d("TiggPrinter", "Created emergency fallback bitmap successfully")
