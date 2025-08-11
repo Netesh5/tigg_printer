@@ -602,7 +602,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             val canvas = Canvas(bitmap)
             canvas.drawColor(Color.WHITE)
             
-            // Draw each line with proper formatting - no aggressive filtering
+            // Draw each line with exact formatting - no modifications
             var y = baseTextSize * lineSpacing + 10f
             for (line in formattedLines) {
                 if (line.text.isNotEmpty()) {
@@ -623,43 +623,32 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     
                     Log.d("TiggPrinter", "Rendering: '${line.text}' (align=${line.alignment}, bold=${line.isBold}, double=${line.isDoubleSize})")
                     
-                    // Use conservative wrapping to preserve table structure
-                    val maxWidth = paperSize - 40f // More margin for alignment
-                    val wrappedLines = if (line.text.length > 50) {
-                        wrapText(line.text, paint, maxWidth)
-                    } else {
-                        listOf(line.text) // Don't wrap short lines to preserve table structure
-                    }
-                    
-                    for (wrappedLine in wrappedLines) {
-                        if (wrappedLine.isNotEmpty()) {
-                            val textWidth = paint.measureText(wrappedLine)
-                            val x = when (line.alignment) {
-                                1 -> { // Center alignment
-                                    val centerX = (paperSize - textWidth) / 2f
-                                    Log.d("TiggPrinter", "CENTER: '$wrappedLine' -> x=$centerX (paperSize=$paperSize, textWidth=$textWidth)")
-                                    maxOf(10f, centerX) // Ensure minimum margin
-                                }
-                                2 -> { // Right alignment
-                                    val rightX = paperSize - textWidth - 20f
-                                    Log.d("TiggPrinter", "RIGHT: '$wrappedLine' -> x=$rightX")
-                                    maxOf(10f, rightX)
-                                }
-                                else -> { // Left alignment or table row
-                                    Log.d("TiggPrinter", "LEFT: '$wrappedLine' -> x=10")
-                                    10f
-                                }
-                            }
-                            
-                            canvas.drawText(wrappedLine, x, y, paint)
-                            y += paint.textSize * lineSpacing
-                            
-                            Log.d("TiggPrinter", "Drew: '$wrappedLine' at x=$x, y=$y, align=${line.alignment}")
+                    // Don't wrap text - preserve exact layout from ESC/POS data
+                    val textWidth = paint.measureText(line.text)
+                    val x = when (line.alignment) {
+                        1 -> { // Center alignment
+                            val centerX = (paperSize - textWidth) / 2f
+                            Log.d("TiggPrinter", "CENTER: '${line.text}' -> x=$centerX (paperSize=$paperSize, textWidth=$textWidth)")
+                            maxOf(5f, centerX) // Minimal margin
+                        }
+                        2 -> { // Right alignment
+                            val rightX = paperSize - textWidth - 10f
+                            Log.d("TiggPrinter", "RIGHT: '${line.text}' -> x=$rightX")
+                            maxOf(5f, rightX)
+                        }
+                        else -> { // Left alignment
+                            Log.d("TiggPrinter", "LEFT: '${line.text}' -> x=5")
+                            5f // Minimal left margin
                         }
                     }
+                    
+                    canvas.drawText(line.text, x, y, paint)
+                    y += paint.textSize * lineSpacing
+                    
+                    Log.d("TiggPrinter", "Drew: '${line.text}' at x=$x, y=$y, align=${line.alignment}")
                 } else {
-                    // Empty line - add proper spacing
-                    y += baseTextSize * 0.8f
+                    // Only add spacing for explicit empty lines in the data
+                    y += baseTextSize * 0.6f
                     Log.d("TiggPrinter", "Empty line spacing")
                 }
             }
@@ -743,23 +732,11 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         fun flushTextBuffer() {
             if (textBuffer.isNotEmpty()) {
                 val text = textBuffer.toString()
-                
-                // Detect if this is a table row (has multiple columns separated by spaces)
-                val isTableRow = text.contains(Regex("\\s{2,}")) && 
-                               (text.contains("Particular") || text.contains("Amount") || 
-                                text.matches(Regex(".*\\d+\\.?\\d*\\s*$")) ||
-                                text.split(Regex("\\s{2,}")).size >= 2)
-                
                 val isDoubleSize = currentDoubleHeight || currentDoubleWidth
                 
-                if (isTableRow) {
-                    // For table rows, preserve exact spacing and don't change alignment
-                    lines.add(FormattedLine(text, 0, currentBold, isDoubleSize)) // Force left align for tables
-                    Log.d("TiggPrinter", "Table row: '$text' (forced left align, bold=$currentBold, double=$isDoubleSize)")
-                } else {
-                    lines.add(FormattedLine(text, currentAlignment, currentBold, isDoubleSize))
-                    Log.d("TiggPrinter", "Text: '$text' (align=$currentAlignment, bold=$currentBold, double=$isDoubleSize)")
-                }
+                // Don't override alignment for any text - respect ESC/POS commands exactly
+                lines.add(FormattedLine(text, currentAlignment, currentBold, isDoubleSize))
+                Log.d("TiggPrinter", "Flushed: '$text' (align=$currentAlignment, bold=$currentBold, double=$isDoubleSize)")
                 textBuffer.clear()
             }
         }
@@ -915,11 +892,8 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 // Control characters
                 0x0A -> { // LF - Line feed
                     flushTextBuffer()
-                    // Only add empty line if the last line wasn't already empty
-                    if (lines.isEmpty() || lines.last().text.isNotEmpty()) {
-                        lines.add(FormattedLine("", currentAlignment, false, false))
-                    }
-                    Log.d("TiggPrinter", "LF - Line feed")
+                    // Don't add automatic empty lines - only if explicitly in the data
+                    Log.d("TiggPrinter", "LF - Line feed (no automatic empty line)")
                     i++
                 }
                 0x0D -> { // CR - Carriage return
@@ -933,6 +907,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
                 0x0C -> { // FF - Form feed
                     flushTextBuffer()
+                    // Only add empty line if explicitly a form feed in raw data
                     lines.add(FormattedLine("", currentAlignment, false, false))
                     Log.d("TiggPrinter", "FF - Form feed")
                     i++
