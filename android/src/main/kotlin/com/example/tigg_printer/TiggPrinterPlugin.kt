@@ -568,29 +568,30 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             val formattedLines = parseEscPosWithFormatting(escPosString, paperSize).toMutableList()
             Log.d("TiggPrinter", "Parsed ${formattedLines.size} formatted lines")
             
-            // Process lines to detect and merge table structures based on PosColumn layout
+            // Process lines to detect and merge table structures based on ESC/POS row/column layout
             val processedLines = mutableListOf<FormattedLine>()
             var i = 0
             while (i < formattedLines.size) {
                 val currentLine = formattedLines[i]
                 val currentText = currentLine.text.trim()
                 
-                // Detect table header pattern: "Particular" followed by "Amount"
+                // Detect table header pattern: "Particular" followed by "Amount" on separate lines
+                // This represents: ticket.row([PosColumn(width: 6, "Particular"), PosColumn(width: 6, "Amount", right)])
                 if (currentText == "Particular8" || currentText == "Particular") {
                     if (i + 1 < formattedLines.size) {
                         val nextLine = formattedLines[i + 1]
                         if (nextLine.text.trim() == "Amount") {
-                            // This represents: PosColumn(width: 6, "Particular") + PosColumn(width: 6, "Amount", right)
-                            val tableHeader = String.format("%-24s%8s", "Particular", "Amount")
+                            // Simple merge with adequate spacing (like the original working version)
+                            val tableHeader = "Particular              Amount"
                             processedLines.add(FormattedLine(tableHeader, 0, currentLine.isBold, currentLine.isDoubleSize))
-                            Log.d("TiggPrinter", "Detected PosColumn header: '$tableHeader'")
+                            Log.d("TiggPrinter", "Merged table header: '$tableHeader'")
                             i += 2
                             continue
                         }
                     }
                 }
                 
-                // Detect product item pattern and look for related lines
+                // Enhanced product detection for ESC/POS row structure
                 if (!currentText.contains("---") && 
                     currentText.isNotEmpty() &&
                     currentText != "Amount" &&
@@ -614,67 +615,57 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     !currentText.matches(Regex(".*PAN.*")) &&
                     !currentText.matches(Regex(".*Phone.*"))) {
                     
-                    // Try to detect PosColumn-based product structure
-                    val productGroup = mutableListOf<String>()
-                    var j = i
-                    var finalAmount = ""
+                    // Look ahead for amount in next few lines (representing separate PosColumns)
+                    var foundAmount = false
+                    var amountLine = ""
+                    var amountIndex = -1
                     
-                    // Look ahead to collect the complete product group
-                    while (j < formattedLines.size) {
-                        val lineText = formattedLines[j].text.trim()
+                    for (j in i + 1..minOf(i + 4, formattedLines.size - 1)) {
+                        val checkLine = formattedLines[j].text.trim()
                         
-                        // Stop if we hit a separator or next product
-                        if (lineText.contains("---") || 
-                            (j > i && isLikelyNewProduct(lineText, formattedLines, j))) {
+                        // Detect numeric amounts (right-aligned PosColumn)
+                        if (checkLine.matches(Regex("\\d+\\.\\d{2}")) ||
+                            checkLine.matches(Regex("\\(\\d+\\.\\d{2}\\)")) ||
+                            checkLine.matches(Regex("\\d+\\.\\d+"))) {
+                            amountLine = checkLine
+                            amountIndex = j
+                            foundAmount = true
                             break
                         }
-                        
-                        // Check if this line contains an amount (PosColumn with right alignment)
-                        val amountMatch = Regex("(\\d+\\.\\d{2})$").find(lineText)
-                        if (amountMatch != null && j > i) {
-                            finalAmount = amountMatch.value
-                            // This line has format: "quantity info" + right-aligned amount
-                            val textPart = lineText.substring(0, lineText.length - finalAmount.length).trim()
-                            if (textPart.isNotEmpty()) {
-                                productGroup.add(textPart)
-                            }
-                            j++
-                            break
-                        } else if (lineText.isNotEmpty()) {
-                            productGroup.add(lineText)
-                        }
-                        j++
-                        
-                        // Limit search to avoid infinite loops
-                        if (j - i > 5) break
                     }
                     
-                    if (productGroup.isNotEmpty()) {
-                        if (finalAmount.isNotEmpty()) {
-                            // Add all product lines except the last one normally
-                            for (k in 0 until productGroup.size - 1) {
-                                // Item name: PosColumn(width: 11) - full width for product name
-                                processedLines.add(FormattedLine(productGroup[k], 0, currentLine.isBold, currentLine.isDoubleSize))
-                                Log.d("TiggPrinter", "Added product name/detail: '${productGroup[k]}'")
-                            }
-                            
-                            // Last line with amount: PosColumn(width: 6) + PosColumn(width: 6, right)
-                            val lastInfo = productGroup.last()
-                            val formattedLine = String.format("%-24s%8s", lastInfo, finalAmount)
-                            processedLines.add(FormattedLine(formattedLine, 0, currentLine.isBold, currentLine.isDoubleSize))
-                            Log.d("TiggPrinter", "Added quantity/amount line: '$formattedLine'")
-                        } else {
-                            // No amount found, add all lines normally
-                            for (line in productGroup) {
-                                processedLines.add(FormattedLine(line, 0, currentLine.isBold, currentLine.isDoubleSize))
+                    if (foundAmount) {
+                        // Collect all product lines between current and amount
+                        val productLines = mutableListOf<String>()
+                        for (k in i until amountIndex) {
+                            val lineText = formattedLines[k].text.trim()
+                            if (lineText.isNotEmpty() && !lineText.contains("---")) {
+                                productLines.add(lineText)
                             }
                         }
-                        i = j
-                        continue
+                        
+                        if (productLines.isNotEmpty()) {
+                            // Add all product lines except the last one normally
+                            for (k in 0 until productLines.size - 1) {
+                                processedLines.add(FormattedLine(productLines[k], 0, currentLine.isBold, currentLine.isDoubleSize))
+                                Log.d("TiggPrinter", "Added product detail: '${productLines[k]}'")
+                            }
+                            
+                            // For the last product line, create a proper row with right-aligned amount
+                            val lastProductLine = productLines.last()
+                            // Use a special format that we can detect later for right alignment
+                            val mergedLine = lastProductLine + "|||" + amountLine  // ||| as separator
+                            
+                            // Use alignment=3 to indicate this needs special right-alignment processing
+                            processedLines.add(FormattedLine(mergedLine, 3, currentLine.isBold, currentLine.isDoubleSize))
+                            Log.d("TiggPrinter", "Added product row with right-aligned amount: '$lastProductLine' -> '$amountLine'")
+                            i = amountIndex + 1
+                            continue
+                        }
                     }
                 }
                 
-                // Add line normally if no special processing
+                // Add line normally if no special processing (preserves original alignment!)
                 processedLines.add(currentLine)
                 i++
             }
@@ -737,6 +728,27 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     }
                     
                     Log.d("TiggPrinter", "Rendering: '${line.text}' (align=${line.alignment}, bold=${line.isBold}, double=${line.isDoubleSize})")
+                    
+                    // Special handling for product rows with right-aligned amounts (alignment=3)
+                    if (line.alignment == 3 && line.text.contains("|||")) {
+                        val parts = line.text.split("|||")
+                        if (parts.size == 2) {
+                            val productText = parts[0].trim()
+                            val amountText = parts[1].trim()
+                            
+                            // Draw product text on left
+                            canvas.drawText(productText, 4f, y, paint)
+                            
+                            // Draw amount on right
+                            val amountWidth = paint.measureText(amountText)
+                            val amountX = paperSize - amountWidth - 4f
+                            canvas.drawText(amountText, maxOf(4f, amountX), y, paint)
+                            
+                            y += paint.textSize * lineSpacing
+                            Log.d("TiggPrinter", "Drew product row: '$productText' (left) and '$amountText' (right)")
+                            continue
+                        }
+                    }
                     
                     // Special handling for HR lines (dashes) to prevent wrapping
                     if (line.text.trim().matches(Regex("-{20,}"))) {
