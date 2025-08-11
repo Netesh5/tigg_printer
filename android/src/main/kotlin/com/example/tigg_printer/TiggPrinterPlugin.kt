@@ -623,29 +623,58 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     
                     Log.d("TiggPrinter", "Rendering: '${line.text}' (align=${line.alignment}, bold=${line.isBold}, double=${line.isDoubleSize})")
                     
-                    // Don't wrap text - preserve exact layout from ESC/POS data
+                    // Handle text wrapping for long text that doesn't fit
                     val textWidth = paint.measureText(line.text)
-                    val x = when (line.alignment) {
-                        1 -> { // Center alignment
-                            val centerX = (paperSize - textWidth) / 2f
-                            Log.d("TiggPrinter", "CENTER: '${line.text}' -> x=$centerX (paperSize=$paperSize, textWidth=$textWidth)")
-                            maxOf(5f, centerX) // Minimal margin
+                    val maxTextWidth = paperSize - 20f // 10px margin on each side
+                    
+                    if (textWidth <= maxTextWidth) {
+                        // Text fits on one line
+                        val x = when (line.alignment) {
+                            1 -> { // Center alignment
+                                val centerX = (paperSize - textWidth) / 2f
+                                Log.d("TiggPrinter", "CENTER: '${line.text}' -> x=$centerX (paperSize=$paperSize, textWidth=$textWidth)")
+                                maxOf(5f, centerX) // Minimal margin
+                            }
+                            2 -> { // Right alignment
+                                val rightX = paperSize - textWidth - 10f
+                                Log.d("TiggPrinter", "RIGHT: '${line.text}' -> x=$rightX")
+                                maxOf(5f, rightX)
+                            }
+                            else -> { // Left alignment
+                                Log.d("TiggPrinter", "LEFT: '${line.text}' -> x=5")
+                                5f // Minimal left margin
+                            }
                         }
-                        2 -> { // Right alignment
-                            val rightX = paperSize - textWidth - 10f
-                            Log.d("TiggPrinter", "RIGHT: '${line.text}' -> x=$rightX")
-                            maxOf(5f, rightX)
-                        }
-                        else -> { // Left alignment
-                            Log.d("TiggPrinter", "LEFT: '${line.text}' -> x=5")
-                            5f // Minimal left margin
+                        
+                        canvas.drawText(line.text, x, y, paint)
+                        y += paint.textSize * lineSpacing
+                        Log.d("TiggPrinter", "Drew: '${line.text}' at x=$x, y=$y, align=${line.alignment}")
+                    } else {
+                        // Text needs wrapping
+                        Log.d("TiggPrinter", "Text too long, wrapping: '${line.text}' (width=$textWidth, max=$maxTextWidth)")
+                        val wrappedLines = wrapText(line.text, paint, maxTextWidth)
+                        
+                        for (wrappedLine in wrappedLines) {
+                            val wrappedTextWidth = paint.measureText(wrappedLine)
+                            val x = when (line.alignment) {
+                                1 -> { // Center alignment
+                                    val centerX = (paperSize - wrappedTextWidth) / 2f
+                                    maxOf(5f, centerX)
+                                }
+                                2 -> { // Right alignment
+                                    val rightX = paperSize - wrappedTextWidth - 10f
+                                    maxOf(5f, rightX)
+                                }
+                                else -> { // Left alignment
+                                    5f
+                                }
+                            }
+                            
+                            canvas.drawText(wrappedLine, x, y, paint)
+                            y += paint.textSize * lineSpacing
+                            Log.d("TiggPrinter", "Drew wrapped: '$wrappedLine' at x=$x, y=$y, align=${line.alignment}")
                         }
                     }
-                    
-                    canvas.drawText(line.text, x, y, paint)
-                    y += paint.textSize * lineSpacing
-                    
-                    Log.d("TiggPrinter", "Drew: '${line.text}' at x=$x, y=$y, align=${line.alignment}")
                 } else {
                     // Only add spacing for explicit empty lines in the data
                     y += baseTextSize * 0.6f
@@ -763,8 +792,16 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                             0x61 -> { // ESC a n - Set alignment
                                 if (i + 2 < bytes.size) {
                                     flushTextBuffer()
-                                    currentAlignment = bytes[i + 2].toInt() and 0xFF
-                                    Log.d("TiggPrinter", "ESC a - Set alignment: $currentAlignment")
+                                    val alignValue = bytes[i + 2].toInt() and 0xFF
+                                    // ESC/POS alignment: 0=left, 1=center, 2=right
+                                    // But sometimes we get ASCII values, so convert properly
+                                    currentAlignment = when (alignValue) {
+                                        48, 0 -> 0 // '0' (ASCII 48) or 0 = left
+                                        49, 1 -> 1 // '1' (ASCII 49) or 1 = center  
+                                        50, 2 -> 2 // '2' (ASCII 50) or 2 = right
+                                        else -> alignValue // Keep original for debugging
+                                    }
+                                    Log.d("TiggPrinter", "ESC a - Set alignment: raw=$alignValue -> mapped=$currentAlignment")
                                     i += 3
                                 } else i += 2
                             }
@@ -943,19 +980,36 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
     
     private fun wrapText(text: String, paint: Paint, maxWidth: Float): List<String> {
-        if (text.isEmpty()) return listOf("") // Return empty string for spacing, not empty list
+        if (text.isEmpty()) return listOf("")
         
-        // Check if text looks like a table row (has multiple spaces or specific patterns)
-        val isTableLikeContent = text.contains("  ") || 
-                                 text.matches(Regex(".*\\s+\\d+\\.?\\d*\\s*")) ||
-                                 text.contains("Particular") ||
-                                 text.contains("Amount") ||
-                                 text.contains("Quantity") ||
-                                 text.contains("Rate")
+        // For very long single words or lines without spaces, split by character
+        if (!text.contains(" ") && paint.measureText(text) > maxWidth) {
+            val lines = mutableListOf<String>()
+            var currentLine = StringBuilder()
+            
+            for (char in text) {
+                val testLine = currentLine.toString() + char
+                if (paint.measureText(testLine) <= maxWidth) {
+                    currentLine.append(char)
+                } else {
+                    if (currentLine.isNotEmpty()) {
+                        lines.add(currentLine.toString())
+                        currentLine = StringBuilder(char.toString())
+                    } else {
+                        // Even single character is too wide, force it
+                        lines.add(char.toString())
+                    }
+                }
+            }
+            
+            if (currentLine.isNotEmpty()) {
+                lines.add(currentLine.toString())
+            }
+            
+            return lines
+        }
         
-        // For table-like content, be more lenient with wrapping
-        val effectiveMaxWidth = if (isTableLikeContent) maxWidth * 1.2f else maxWidth
-        
+        // Normal word-based wrapping
         val words = text.split(" ")
         val lines = mutableListOf<String>()
         var currentLine = StringBuilder()
@@ -964,12 +1018,19 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             val testLine = if (currentLine.isEmpty()) word else "${currentLine} $word"
             val textWidth = paint.measureText(testLine)
             
-            if (textWidth <= effectiveMaxWidth || currentLine.isEmpty()) {
+            if (textWidth <= maxWidth || currentLine.isEmpty()) {
                 if (currentLine.isNotEmpty()) currentLine.append(" ")
                 currentLine.append(word)
             } else {
                 lines.add(currentLine.toString())
                 currentLine = StringBuilder(word)
+                
+                // If even single word is too long, break it by character
+                if (paint.measureText(word) > maxWidth) {
+                    val brokenLines = wrapText(word, paint, maxWidth)
+                    lines.addAll(brokenLines.dropLast(1)) // Add all but last
+                    currentLine = StringBuilder(brokenLines.last()) // Keep last as current
+                }
             }
         }
         
@@ -977,7 +1038,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             lines.add(currentLine.toString())
         }
         
-        return if (lines.isEmpty()) listOf("") else lines // Always return at least one line
+        return if (lines.isEmpty()) listOf("") else lines
     }
     
     private fun extractSimpleTextFromEscPos(escPosString: String): String {
