@@ -691,17 +691,17 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             val baseTextSize = 20.0f // Back to 20px as requested
             Log.d("TiggPrinter", "*** USING READABLE FONT SIZE: ${baseTextSize}px ***")
             val lineSpacing = 1.2f // Slightly more spacing for larger font
-            var totalHeight = 20f // Top padding (increased)
+            var totalHeight = 10f // Reduced top padding
             
             for (line in finalLines) {
                 val textSize = when {
                     line.isDoubleSize -> baseTextSize * 1.5f
                     else -> baseTextSize
                 }
-                // Account for potential text wrapping by adding more height per line
-                totalHeight += textSize * lineSpacing * 1.5f // Extra height for potential wrapping
+                // Normal height calculation without extra wrapping space
+                totalHeight += textSize * lineSpacing
             }
-            totalHeight += 50f // Bottom padding (increased)
+            totalHeight += 20f // Reduced bottom padding
             
             // Create bitmap
             val bitmap = Bitmap.createBitmap(paperSize, totalHeight.toInt(), Bitmap.Config.ARGB_8888)
@@ -709,7 +709,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             canvas.drawColor(Color.WHITE)
             
             // Draw each line with exact formatting - no modifications
-            var y = baseTextSize * lineSpacing + 20f // Increased initial Y position
+            var y = baseTextSize * lineSpacing + 10f // Reduced initial Y position
             for (line in finalLines) {
                 if (line.text.isNotEmpty()) {
                     val paint = Paint().apply {
@@ -918,11 +918,25 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         fun flushTextBuffer() {
             if (textBuffer.isNotEmpty()) {
                 val text = textBuffer.toString()
-                val isDoubleSize = currentDoubleHeight || currentDoubleWidth
+                    .replace("\u0000", "") // Remove null characters
+                    .replace("\ufffd", "") // Remove replacement characters (boxes)
+                    .replace("\u00a0", " ") // Replace non-breaking space with regular space
+                    .replace("€", "") // Remove Euro symbol
+                    .replace("£", "") // Remove Pound symbol
+                    .replace("¥", "") // Remove Yen symbol
+                    .replace("©", "") // Remove copyright symbol
+                    .replace("®", "") // Remove registered symbol
+                    .replace("™", "") // Remove trademark symbol
+                    .replace(Regex("[\\u0080-\\u00FF]"), "") // Remove all extended ASCII
+                    .trim()
                 
-                // Don't override alignment for any text - respect ESC/POS commands exactly
-                lines.add(FormattedLine(text, currentAlignment, currentBold, isDoubleSize))
-                Log.d("TiggPrinter", "Flushed: '$text' (align=$currentAlignment, bold=$currentBold, double=$isDoubleSize)")
+                if (text.isNotEmpty()) {
+                    val isDoubleSize = currentDoubleHeight || currentDoubleWidth
+                    
+                    // Don't override alignment for any text - respect ESC/POS commands exactly
+                    lines.add(FormattedLine(text, currentAlignment, currentBold, isDoubleSize))
+                    Log.d("TiggPrinter", "Flushed: '$text' (align=$currentAlignment, bold=$currentBold, double=$isDoubleSize)")
+                }
                 textBuffer.clear()
             }
         }
@@ -1101,28 +1115,33 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
                 0x0C -> { // FF - Form feed
                     flushTextBuffer()
-                    // Only add empty line if explicitly a form feed in raw data
-                    lines.add(FormattedLine("", currentAlignment, false, false))
-                    Log.d("TiggPrinter", "FF - Form feed")
+                    // Skip adding empty lines for form feeds to reduce spacing
+                    Log.d("TiggPrinter", "FF - Form feed (skipped empty line)")
                     i++
                 }
                 
                 // Printable ASCII characters
                 in 0x20..0x7E -> {
-                    textBuffer.append(byte.toChar())
+                    val char = byte.toChar()
+                    // Only allow safe, commonly used characters
+                    if (char.isLetterOrDigit() || char in " !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~") {
+                        textBuffer.append(char)
+                    }
                     i++
                 }
                 
-                // Extended ASCII (for international characters)
+                // Extended ASCII - be very restrictive to avoid unwanted symbols
                 in 0x80..0xFF -> {
-                    textBuffer.append(byte.toChar())
+                    // Skip extended ASCII entirely to avoid unwanted symbols like Euro, etc.
+                    // Most thermal printers work fine with basic ASCII only
+                    Log.d("TiggPrinter", "Skipping extended ASCII: 0x${byte.toString(16)}")
                     i++
                 }
                 
-                // Other control characters - skip
+                // Other control characters - skip and log for debugging
                 else -> {
                     if (byte != 0) { // Don't log null bytes
-                        Log.d("TiggPrinter", "Skipping control char: 0x${byte.toString(16)}")
+                        Log.d("TiggPrinter", "Skipping control/unknown char: 0x${byte.toString(16)} ('${byte.toChar()}')")
                     }
                     i++
                 }
