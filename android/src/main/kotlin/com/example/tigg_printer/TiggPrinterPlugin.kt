@@ -918,17 +918,9 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         fun flushTextBuffer() {
             if (textBuffer.isNotEmpty()) {
                 val text = textBuffer.toString()
+                    .replace("€", "") // Remove Euro symbol specifically
                     .replace("\u0000", "") // Remove null characters
                     .replace("\ufffd", "") // Remove replacement characters (boxes)
-                    .replace("\u00a0", " ") // Replace non-breaking space with regular space
-                    .replace("€", "") // Remove Euro symbol
-                    .replace("£", "") // Remove Pound symbol
-                    .replace("¥", "") // Remove Yen symbol
-                    .replace("©", "") // Remove copyright symbol
-                    .replace("®", "") // Remove registered symbol
-                    .replace("™", "") // Remove trademark symbol
-                    .replace(Regex("[\\u0080-\\u00FF]"), "") // Remove all extended ASCII
-                    .trim()
                 
                 if (text.isNotEmpty()) {
                     val isDoubleSize = currentDoubleHeight || currentDoubleWidth
@@ -1115,33 +1107,32 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
                 0x0C -> { // FF - Form feed
                     flushTextBuffer()
-                    // Skip adding empty lines for form feeds to reduce spacing
-                    Log.d("TiggPrinter", "FF - Form feed (skipped empty line)")
+                    // Add empty line for form feeds to preserve formatting
+                    lines.add(FormattedLine("", currentAlignment, false, false))
+                    Log.d("TiggPrinter", "FF - Form feed")
                     i++
                 }
                 
                 // Printable ASCII characters
                 in 0x20..0x7E -> {
+                    textBuffer.append(byte.toChar())
+                    i++
+                }
+                
+                // Extended ASCII (for international characters) - restore but filter specific problematic chars
+                in 0x80..0xFF -> {
                     val char = byte.toChar()
-                    // Only allow safe, commonly used characters
-                    if (char.isLetterOrDigit() || char in " !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~") {
+                    // Only filter out specific problematic characters, not all extended ASCII
+                    if (char != '€' && char != '£' && char != '¥') {
                         textBuffer.append(char)
                     }
                     i++
                 }
                 
-                // Extended ASCII - be very restrictive to avoid unwanted symbols
-                in 0x80..0xFF -> {
-                    // Skip extended ASCII entirely to avoid unwanted symbols like Euro, etc.
-                    // Most thermal printers work fine with basic ASCII only
-                    Log.d("TiggPrinter", "Skipping extended ASCII: 0x${byte.toString(16)}")
-                    i++
-                }
-                
-                // Other control characters - skip and log for debugging
+                // Other control characters - skip
                 else -> {
                     if (byte != 0) { // Don't log null bytes
-                        Log.d("TiggPrinter", "Skipping control/unknown char: 0x${byte.toString(16)} ('${byte.toChar()}')")
+                        Log.d("TiggPrinter", "Skipping control char: 0x${byte.toString(16)}")
                     }
                     i++
                 }
