@@ -701,7 +701,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 // Normal height calculation without extra wrapping space
                 totalHeight += textSize * lineSpacing
             }
-            totalHeight += 50f // Added bottom padding for paper feed
+            totalHeight += 100f // Increased bottom padding for easier paper handling
             
             // Create bitmap
             val bitmap = Bitmap.createBitmap(paperSize, totalHeight.toInt(), Bitmap.Config.ARGB_8888)
@@ -919,6 +919,11 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             if (textBuffer.isNotEmpty()) {
                 val text = textBuffer.toString()
                     .replace("€", "") // Remove Euro symbol specifically
+                    .replace("£", "") // Remove Pound symbol
+                    .replace("¥", "") // Remove Yen symbol
+                    .replace("¢", "") // Remove Cent symbol
+                    .replace("₹", "") // Remove Rupee symbol
+                    .replace("\u0080", "") // Remove Euro symbol (Windows-1252)
                     .replace("\u0000", "") // Remove null characters
                     .replace("\ufffd", "") // Remove replacement characters (boxes)
                 
@@ -1122,8 +1127,15 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 // Extended ASCII (for international characters) - restore but filter specific problematic chars
                 in 0x80..0xFF -> {
                     val char = byte.toChar()
-                    // Only filter out specific problematic characters, not all extended ASCII
-                    if (char != '€' && char != '£' && char != '¥') {
+                    val byteValue = byte.toInt() and 0xFF
+                    // Filter out currency symbols and problematic characters
+                    if (char != '€' && char != '£' && char != '¥' && char != '¢' && char != '₹' && 
+                        byteValue != 0x80 && // Euro in Windows-1252
+                        byteValue != 0x9C && // Pound-like symbol
+                        byteValue != 0xA2 && // Cent symbol
+                        byteValue != 0xA3 && // Pound symbol
+                        byteValue != 0xA4 && // Generic currency symbol
+                        byteValue != 0xA5) { // Yen symbol
                         textBuffer.append(char)
                     }
                     i++
