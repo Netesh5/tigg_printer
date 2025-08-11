@@ -653,6 +653,10 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                             
                             // For the last product line, create a proper row with right-aligned amount
                             val lastProductLine = productLines.last()
+                                .replace(Regex("\\d+\\.\\d+[A-Z]"), { matchResult ->
+                                    // Remove trailing letters from numeric values (like 88.49D -> 88.49)
+                                    matchResult.value.replace(Regex("[A-Z]+$"), "")
+                                })
                             // Use a special format that we can detect later for right alignment
                             val mergedLine = lastProductLine + "|||" + amountLine  // ||| as separator
                             
@@ -926,6 +930,8 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     .replace("\u0080", "") // Remove Euro symbol (Windows-1252)
                     .replace("\u0000", "") // Remove null characters
                     .replace("\ufffd", "") // Remove replacement characters (boxes)
+                    .replace(Regex("(\\d+\\.\\d+)D"), "$1") // Remove 'D' after decimal numbers (e.g., "88.49D" -> "88.49")
+                    .replace(Regex("(\\d+)D"), "$1") // Remove 'D' after whole numbers (e.g., "100D" -> "100")
                 
                 if (text.isNotEmpty()) {
                     val isDoubleSize = currentDoubleHeight || currentDoubleWidth
