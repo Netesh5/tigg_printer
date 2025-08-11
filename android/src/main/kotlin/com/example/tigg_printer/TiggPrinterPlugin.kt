@@ -568,30 +568,29 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             val formattedLines = parseEscPosWithFormatting(escPosString, paperSize).toMutableList()
             Log.d("TiggPrinter", "Parsed ${formattedLines.size} formatted lines")
             
-            // Process lines to detect and merge table structures
+            // Process lines to detect and merge table structures based on PosColumn layout
             val processedLines = mutableListOf<FormattedLine>()
             var i = 0
             while (i < formattedLines.size) {
                 val currentLine = formattedLines[i]
+                val currentText = currentLine.text.trim()
                 
-                // Check if this line looks like a table header (Particular/Amount)
-                if (currentLine.text.trim() == "Particular8" || currentLine.text.trim() == "Particular") {
-                    // Look for Amount on next line
+                // Detect table header pattern: "Particular" followed by "Amount"
+                if (currentText == "Particular8" || currentText == "Particular") {
                     if (i + 1 < formattedLines.size) {
                         val nextLine = formattedLines[i + 1]
                         if (nextLine.text.trim() == "Amount") {
-                            // Merge into table header row with proper spacing for 58mm paper
-                            val tableHeader = "Particular              Amount"
+                            // This represents: PosColumn(width: 6, "Particular") + PosColumn(width: 6, "Amount", right)
+                            val tableHeader = String.format("%-24s%8s", "Particular", "Amount")
                             processedLines.add(FormattedLine(tableHeader, 0, currentLine.isBold, currentLine.isDoubleSize))
-                            Log.d("TiggPrinter", "Merged table header: '$tableHeader'")
-                            i += 2 // Skip both lines
+                            Log.d("TiggPrinter", "Detected PosColumn header: '$tableHeader'")
+                            i += 2
                             continue
                         }
                     }
                 }
                 
-                // Enhanced product item detection - preserve line structure but align amount with last line
-                val currentText = currentLine.text.trim()
+                // Detect product item pattern and look for related lines
                 if (!currentText.contains("---") && 
                     currentText.isNotEmpty() &&
                     currentText != "Amount" &&
@@ -615,58 +614,67 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     !currentText.matches(Regex(".*PAN.*")) &&
                     !currentText.matches(Regex(".*Phone.*"))) {
                     
-                    // Look ahead for a numeric amount in the next few lines
-                    var foundAmount = false
-                    var amountLine = ""
-                    var amountIndex = -1
+                    // Try to detect PosColumn-based product structure
+                    val productGroup = mutableListOf<String>()
+                    var j = i
+                    var finalAmount = ""
                     
-                    for (j in i + 1..minOf(i + 4, formattedLines.size - 1)) {
-                        val checkLine = formattedLines[j].text.trim()
+                    // Look ahead to collect the complete product group
+                    while (j < formattedLines.size) {
+                        val lineText = formattedLines[j].text.trim()
                         
-                        // More flexible amount detection
-                        if (checkLine.matches(Regex("\\d+\\.\\d{2}")) ||
-                            checkLine.matches(Regex("\\(\\d+\\.\\d{2}\\)")) ||
-                            checkLine.matches(Regex("\\d+\\.\\d+"))) {
-                            amountLine = checkLine
-                            amountIndex = j
-                            foundAmount = true
+                        // Stop if we hit a separator or next product
+                        if (lineText.contains("---") || 
+                            (j > i && isLikelyNewProduct(lineText, formattedLines, j))) {
                             break
                         }
+                        
+                        // Check if this line contains an amount (PosColumn with right alignment)
+                        val amountMatch = Regex("(\\d+\\.\\d{2})$").find(lineText)
+                        if (amountMatch != null && j > i) {
+                            finalAmount = amountMatch.value
+                            // This line has format: "quantity info" + right-aligned amount
+                            val textPart = lineText.substring(0, lineText.length - finalAmount.length).trim()
+                            if (textPart.isNotEmpty()) {
+                                productGroup.add(textPart)
+                            }
+                            j++
+                            break
+                        } else if (lineText.isNotEmpty()) {
+                            productGroup.add(lineText)
+                        }
+                        j++
+                        
+                        // Limit search to avoid infinite loops
+                        if (j - i > 5) break
                     }
                     
-                    if (foundAmount) {
-                        // Add all product lines as separate lines, but modify the last one to include amount
-                        val productLines = mutableListOf<String>()
-                        for (k in i until amountIndex) {
-                            val lineText = formattedLines[k].text.trim()
-                            if (lineText.isNotEmpty() && !lineText.contains("---")) {
-                                productLines.add(lineText)
-                            }
-                        }
-                        
-                        if (productLines.isNotEmpty()) {
+                    if (productGroup.isNotEmpty()) {
+                        if (finalAmount.isNotEmpty()) {
                             // Add all product lines except the last one normally
-                            for (k in 0 until productLines.size - 1) {
-                                processedLines.add(FormattedLine(productLines[k], 0, currentLine.isBold, currentLine.isDoubleSize))
-                                Log.d("TiggPrinter", "Added product line: '${productLines[k]}'")
+                            for (k in 0 until productGroup.size - 1) {
+                                // Item name: PosColumn(width: 11) - full width for product name
+                                processedLines.add(FormattedLine(productGroup[k], 0, currentLine.isBold, currentLine.isDoubleSize))
+                                Log.d("TiggPrinter", "Added product name/detail: '${productGroup[k]}'")
                             }
                             
-                            // For the last product line, add the amount with proper spacing
-                            val lastProductLine = productLines.last()
-                            val totalWidth = 32 // Approximate character width for 58mm paper
-                            val usedSpace = lastProductLine.length + amountLine.length
-                            val spacing = maxOf(1, totalWidth - usedSpace)
-                            val lastLineWithAmount = lastProductLine + " ".repeat(spacing) + amountLine
-                            
-                            processedLines.add(FormattedLine(lastLineWithAmount, 0, currentLine.isBold, currentLine.isDoubleSize))
-                            Log.d("TiggPrinter", "Added final product line with amount: '$lastLineWithAmount'")
-                            i = amountIndex + 1 // Skip to after the amount
-                            continue
+                            // Last line with amount: PosColumn(width: 6) + PosColumn(width: 6, right)
+                            val lastInfo = productGroup.last()
+                            val formattedLine = String.format("%-24s%8s", lastInfo, finalAmount)
+                            processedLines.add(FormattedLine(formattedLine, 0, currentLine.isBold, currentLine.isDoubleSize))
+                            Log.d("TiggPrinter", "Added quantity/amount line: '$formattedLine'")
+                        } else {
+                            // No amount found, add all lines normally
+                            for (line in productGroup) {
+                                processedLines.add(FormattedLine(line, 0, currentLine.isBold, currentLine.isDoubleSize))
+                            }
                         }
+                        i = j
+                        continue
                     }
                 }
                 
-                // Add line normally if no merging occurred
+                // Add line normally if no special processing
                 processedLines.add(currentLine)
                 i++
             }
@@ -730,9 +738,39 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     
                     Log.d("TiggPrinter", "Rendering: '${line.text}' (align=${line.alignment}, bold=${line.isBold}, double=${line.isDoubleSize})")
                     
+                    // Special handling for HR lines (dashes) to prevent wrapping
+                    if (line.text.trim().matches(Regex("-{20,}"))) {
+                        val availableWidth = paperSize - 8f // Account for margins
+                        val dashChar = "-"
+                        val singleDashWidth = paint.measureText(dashChar)
+                        val maxDashes = (availableWidth / singleDashWidth).toInt()
+                        val adjustedHrLine = dashChar.repeat(maxDashes)
+                        
+                        val x = when (line.alignment) {
+                            1 -> { // Center alignment
+                                val hrWidth = paint.measureText(adjustedHrLine)
+                                val centerX = (paperSize - hrWidth) / 2f
+                                maxOf(4f, centerX)
+                            }
+                            2 -> { // Right alignment
+                                val hrWidth = paint.measureText(adjustedHrLine)
+                                val rightX = paperSize - hrWidth - 4f
+                                maxOf(4f, rightX)
+                            }
+                            else -> { // Left alignment
+                                4f
+                            }
+                        }
+                        
+                        canvas.drawText(adjustedHrLine, x, y, paint)
+                        y += paint.textSize * lineSpacing
+                        Log.d("TiggPrinter", "Drew HR line: '$adjustedHrLine' at x=$x, y=$y (${maxDashes} dashes)")
+                        continue
+                    }
+                    
                     // Handle text wrapping for long text that doesn't fit
                     val textWidth = paint.measureText(line.text)
-                    val maxTextWidth = paperSize - 4f // 2px margin on each side (further reduced)
+                    val maxTextWidth = paperSize - 8f // 4px margin on each side for balanced padding
                     
                     if (textWidth <= maxTextWidth) {
                         // Text fits on one line
@@ -740,16 +778,16 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                             1 -> { // Center alignment
                                 val centerX = (paperSize - textWidth) / 2f
                                 Log.d("TiggPrinter", "CENTER: '${line.text}' -> x=$centerX (paperSize=$paperSize, textWidth=$textWidth)")
-                                maxOf(1f, centerX) // Minimal margin (further reduced)
+                                maxOf(4f, centerX) // Balanced margin
                             }
                             2 -> { // Right alignment
-                                val rightX = paperSize - textWidth - 2f // Further reduced
+                                val rightX = paperSize - textWidth - 4f // Balanced margin
                                 Log.d("TiggPrinter", "RIGHT: '${line.text}' -> x=$rightX")
-                                maxOf(1f, rightX)
+                                maxOf(4f, rightX)
                             }
                             else -> { // Left alignment
-                                Log.d("TiggPrinter", "LEFT: '${line.text}' -> x=1")
-                                1f // Minimal left margin (further reduced)
+                                Log.d("TiggPrinter", "LEFT: '${line.text}' -> x=4")
+                                4f // Balanced left margin
                             }
                         }
                         
@@ -766,14 +804,14 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                             val x = when (line.alignment) {
                                 1 -> { // Center alignment
                                     val centerX = (paperSize - wrappedTextWidth) / 2f
-                                    maxOf(1f, centerX) // Further reduced margin
+                                    maxOf(4f, centerX) // Balanced margin
                                 }
                                 2 -> { // Right alignment
-                                    val rightX = paperSize - wrappedTextWidth - 2f // Further reduced margin
-                                    maxOf(1f, rightX)
+                                    val rightX = paperSize - wrappedTextWidth - 4f // Balanced margin
+                                    maxOf(4f, rightX)
                                 }
                                 else -> { // Left alignment
-                                    1f // Further reduced margin
+                                    4f // Balanced margin
                                 }
                             }
                             
@@ -822,17 +860,17 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 
                 if (simpleText.isNotEmpty()) {
                     // Use proper text wrapping based on actual text width
-                    val maxLineWidth = paperSize - 4f // 2px margin each side (further reduced)
+                    val maxLineWidth = paperSize - 8f // 4px margin each side (balanced)
                     val wrappedLines = wrapText(simpleText, paint, maxLineWidth)
                     
                     var y = 40f
                     for (line in wrappedLines.take(8)) { // Max 8 lines for fallback
-                        canvas.drawText(line, 2f, y, paint) // Further reduced margin
+                        canvas.drawText(line, 4f, y, paint) // Balanced margin
                         y += paint.textSize * 1.2f
                     }
                 } else {
-                    canvas.drawText("No readable text found", 2f, 40f, paint)
-                    canvas.drawText("Data length: ${escPosString.length}", 2f, 80f, paint)
+                    canvas.drawText("No readable text found", 4f, 40f, paint)
+                    canvas.drawText("Data length: ${escPosString.length}", 4f, 80f, paint)
                 }
                 
                 Log.d("TiggPrinter", "Created emergency fallback bitmap successfully")
@@ -1187,5 +1225,28 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         
         return result.toString()
+    }
+    
+    private fun isLikelyNewProduct(lineText: String, allLines: List<FormattedLine>, currentIndex: Int): Boolean {
+        // A line is likely a new product if it's not empty, doesn't contain system info,
+        // and is followed by product-related information
+        if (lineText.isEmpty() || 
+            lineText.contains("Total") ||
+            lineText.contains("VAT") ||
+            lineText.contains("Discount") ||
+            lineText.matches(Regex("\\d+\\.\\d{2}")) ||
+            lineText.contains("HS Code")) {
+            return false
+        }
+        
+        // Check if next line might be HS Code or quantity info
+        if (currentIndex + 1 < allLines.size) {
+            val nextLine = allLines[currentIndex + 1].text.trim()
+            if (nextLine.contains("HS Code") || nextLine.matches(Regex("\\d+\\s+\\w+\\s+x.*"))) {
+                return true
+            }
+        }
+        
+        return false
     }
 }
