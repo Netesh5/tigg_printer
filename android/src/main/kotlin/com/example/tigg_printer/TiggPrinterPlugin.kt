@@ -92,6 +92,37 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     return
                 }
                 
+                // Log device and Android version info for debugging
+                Log.i("TiggPrinter", "Device: ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
+                Log.i("TiggPrinter", "Android Version: ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})")
+                Log.i("TiggPrinter", "Target package: com.fewapay.cplus")
+                
+                // Check if target package is installed
+                try {
+                    val packageInfo = context.packageManager.getPackageInfo("com.fewapay.cplus", 0)
+                    Log.i("TiggPrinter", "Target package found: ${packageInfo.packageName} v${packageInfo.versionName}")
+                } catch (e: Exception) {
+                    Log.w("TiggPrinter", "Target package 'com.fewapay.cplus' not found: ${e.message}")
+                    
+                    // List available packages that might be printer services
+                    val installedPackages = context.packageManager.getInstalledPackages(0)
+                    val printerPackages = installedPackages.filter { 
+                        it.packageName.contains("printer", ignoreCase = true) ||
+                        it.packageName.contains("tigg", ignoreCase = true) ||
+                        it.packageName.contains("pos", ignoreCase = true) ||
+                        it.packageName.contains("fewa", ignoreCase = true)
+                    }
+                    
+                    if (printerPackages.isNotEmpty()) {
+                        Log.i("TiggPrinter", "Found potential printer packages:")
+                        printerPackages.forEach { pkg ->
+                            Log.i("TiggPrinter", "  - ${pkg.packageName} v${pkg.versionName}")
+                        }
+                    } else {
+                        Log.w("TiggPrinter", "No printer-related packages found on device")
+                    }
+                }
+                
                 // Check current connection status
                 val currentStatus = AppService.me().isServiceConnected()
                 Log.i("TiggPrinter", "Manual bind service requested")
@@ -111,7 +142,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     // Wait a bit for connection and then check status
                     Thread {
                         try {
-                            Thread.sleep(1000)
+                            Thread.sleep(2000) // Increased wait time for slower devices
                             val finalStatus = AppService.me()?.isServiceConnected() ?: false
                             Log.i("TiggPrinter", "Service connection status after bind: $finalStatus")
                             
@@ -119,7 +150,14 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                                 if (finalStatus) {
                                     result.success("Service bound and connected successfully")
                                 } else {
-                                    result.error("BIND_FAILED", "Service bind initiated but connection failed. TiggPrinter service may not be running.", null)
+                                    result.error("BIND_FAILED", 
+                                        "Service bind failed. The TiggPrinter service (com.fewapay.cplus) may not be installed or compatible with this device/Android version.", 
+                                        mapOf(
+                                            "device" to "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}",
+                                            "androidVersion" to "${android.os.Build.VERSION.RELEASE}",
+                                            "apiLevel" to android.os.Build.VERSION.SDK_INT,
+                                            "targetPackage" to "com.fewapay.cplus"
+                                        ))
                                 }
                             }
                         } catch (e: Exception) {
