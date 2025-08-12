@@ -10,6 +10,8 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.RemoteException
 import android.util.Base64
 import android.util.Log
@@ -29,6 +31,12 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     private lateinit var channel: MethodChannel
     private lateinit var context: Context
+    
+    // Backwards-compatible main thread executor for Android 7+
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private fun runOnMainThread(action: () -> Unit) {
+        mainHandler.post(action)
+    }
 
     override fun onAttachedToEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
         context = binding.applicationContext
@@ -85,7 +93,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                         // First check if AppService is initialized
                         if (AppService.me() == null) {
                             Log.e("TiggPrinter", "AppService is not initialized")
-                            context.mainExecutor.execute {
+                            runOnMainThread {
                                 result.error("SERVICE_NOT_INITIALIZED", "AppService is not initialized", null)
                             }
                             return@Thread
@@ -96,7 +104,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                         Log.i("TiggPrinter", "Current service connection status: $currentStatus")
                         
                         if (currentStatus) {
-                            context.mainExecutor.execute {
+                            runOnMainThread {
                                 result.success("Service is already connected")
                             }
                             return@Thread
@@ -113,7 +121,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                         Log.i("TiggPrinter", "Service connection status after bind: $finalStatus")
                         
                         // Return result on main thread
-                        context.mainExecutor.execute {
+                        runOnMainThread {
                             if (finalStatus) {
                                 result.success("Service bound and connected successfully")
                             } else {
@@ -123,7 +131,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                         
                     } catch (e: Exception) {
                         Log.e("TiggPrinter", "Failed to bind service", e)
-                        context.mainExecutor.execute {
+                        runOnMainThread {
                             result.error("BIND_ERROR", "Error during service binding: ${e.message}", null)
                         }
                     }
@@ -183,7 +191,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     AppService.me().startPrinting(bitmap, true, object : IPaymentCallback.Stub() {
                         override fun onSuccess(success: Boolean, message: String?) {
                             // Ensure callback runs on main thread
-                            context.mainExecutor.execute {
+                            runOnMainThread {
                                 if (success) {
                                     result.success(mapOf(
                                         "success" to true,
@@ -257,7 +265,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             //         AppService.me().startPrinting(bitmap, false, object : IPaymentCallback.Stub() {
             //             override fun onSuccess(success: Boolean, message: String?) {
             //                 Log.d("TiggPrinter", "Print callback - onSuccess: success=$success, message=$message")
-            //                 context.mainExecutor.execute {
+            //                 runOnMainThread {
             //                     if (success) {
             //                         result.success(mapOf(
             //                             "success" to true,
@@ -332,7 +340,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         AppService.me().startPrinting(bitmap, false, object : IPaymentCallback.Stub() {
             override fun onSuccess(success: Boolean, message: String?) {
                 Log.d("TiggPrinter", "Print callback - onSuccess: success=$success, message=$message")
-                context.mainExecutor.execute {
+                runOnMainThread {
                     if (success) {
                         val response = mapOf<String, Any?>(
                             "success" to true,
@@ -415,7 +423,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                         AppService.me().startPrinting(escPosString, textSize, object : IPaymentCallback.Stub() {
                             override fun onSuccess(success: Boolean, message: String?) {
                                 Log.d("TiggPrinter", "Raw bytes (string) print callback - onSuccess: success=$success, message=$message")
-                                context.mainExecutor.execute {
+                                runOnMainThread {
                                     if (success) {
                                         result.success(mapOf(
                                             "success" to true,
@@ -443,7 +451,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                         AppService.me().startPrinting(rawBitmap, false, object : IPaymentCallback.Stub() {
                             override fun onSuccess(success: Boolean, message: String?) {
                                 Log.d("TiggPrinter", "Raw bytes (bitmap) print callback - onSuccess: success=$success, message=$message")
-                                context.mainExecutor.execute {
+                                runOnMainThread {
                                     if (success) {
                                         result.success(mapOf(
                                             "success" to true,
