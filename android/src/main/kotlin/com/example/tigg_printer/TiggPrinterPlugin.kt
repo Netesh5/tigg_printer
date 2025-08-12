@@ -85,57 +85,55 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
             }
             "bindService" -> {
-                // Execute binding in background to avoid blocking main thread
-                Thread {
-                    try {
-                        Log.i("TiggPrinter", "Manual bind service requested")
-                        
-                        // First check if AppService is initialized
-                        if (AppService.me() == null) {
-                            Log.e("TiggPrinter", "AppService is not initialized")
+                // Check initialization first
+                if (AppService.me() == null) {
+                    Log.e("TiggPrinter", "AppService is not initialized")
+                    result.error("SERVICE_NOT_INITIALIZED", "AppService is not initialized", null)
+                    return
+                }
+                
+                // Check current connection status
+                val currentStatus = AppService.me().isServiceConnected()
+                Log.i("TiggPrinter", "Manual bind service requested")
+                Log.i("TiggPrinter", "Current service connection status: $currentStatus")
+                
+                if (currentStatus) {
+                    result.success("Service is already connected")
+                    return
+                }
+                
+                // Execute binding on main thread since AppService.bindService() needs Looper
+                Log.i("TiggPrinter", "Attempting service bind...")
+                try {
+                    val bindResult = AppService.me().bindService()
+                    Log.i("TiggPrinter", "Bind service result: $bindResult")
+                    
+                    // Wait a bit for connection and then check status
+                    Thread {
+                        try {
+                            Thread.sleep(1000)
+                            val finalStatus = AppService.me()?.isServiceConnected() ?: false
+                            Log.i("TiggPrinter", "Service connection status after bind: $finalStatus")
+                            
                             runOnMainThread {
-                                result.error("SERVICE_NOT_INITIALIZED", "AppService is not initialized", null)
+                                if (finalStatus) {
+                                    result.success("Service bound and connected successfully")
+                                } else {
+                                    result.error("BIND_FAILED", "Service bind initiated but connection failed. TiggPrinter service may not be running.", null)
+                                }
                             }
-                            return@Thread
-                        }
-                        
-                        // Check current connection status
-                        val currentStatus = AppService.me().isServiceConnected()
-                        Log.i("TiggPrinter", "Current service connection status: $currentStatus")
-                        
-                        if (currentStatus) {
+                        } catch (e: Exception) {
+                            Log.e("TiggPrinter", "Error during bind status check", e)
                             runOnMainThread {
-                                result.success("Service is already connected")
-                            }
-                            return@Thread
-                        }
-                        
-                        // Attempt to bind with timeout to prevent hanging
-                        Log.i("TiggPrinter", "Attempting service bind...")
-                        val bindResult = AppService.me().bindService()
-                        Log.i("TiggPrinter", "Bind service result: $bindResult")
-                        
-                        // Short wait for connection - reduced from 2s to 1s
-                        Thread.sleep(1000)
-                        val finalStatus = AppService.me()?.isServiceConnected() ?: false
-                        Log.i("TiggPrinter", "Service connection status after bind: $finalStatus")
-                        
-                        // Return result on main thread
-                        runOnMainThread {
-                            if (finalStatus) {
-                                result.success("Service bound and connected successfully")
-                            } else {
-                                result.error("BIND_FAILED", "Service bind initiated but connection failed. TiggPrinter service may not be running.", null)
+                                result.error("BIND_ERROR", "Error during service binding: ${e.message}", null)
                             }
                         }
-                        
-                    } catch (e: Exception) {
-                        Log.e("TiggPrinter", "Failed to bind service", e)
-                        runOnMainThread {
-                            result.error("BIND_ERROR", "Error during service binding: ${e.message}", null)
-                        }
-                    }
-                }.start()
+                    }.start()
+                    
+                } catch (e: Exception) {
+                    Log.e("TiggPrinter", "Failed to bind service", e)
+                    result.error("BIND_ERROR", "Error during service binding: ${e.message}", null)
+                }
             }
             "isServiceConnected" -> {
                 try {
