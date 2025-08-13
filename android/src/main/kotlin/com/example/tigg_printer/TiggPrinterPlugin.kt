@@ -705,7 +705,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 // Normal height calculation without extra wrapping space
                 totalHeight += textSize * lineSpacing
             }
-            totalHeight += 50f // Increased bottom padding for easier paper handling
+            totalHeight += 120f // Increased bottom padding for easier paper handling
             
             // Create bitmap
             val bitmap = Bitmap.createBitmap(paperSize, totalHeight.toInt(), Bitmap.Config.ARGB_8888)
