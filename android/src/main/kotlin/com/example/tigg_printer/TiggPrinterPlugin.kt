@@ -759,8 +759,18 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     if (line.alignment == 3 && line.text.contains("|||")) {
                         val parts = line.text.split("|||")
                         if (parts.size == 2) {
-                            val productText = parts[0].trim()
+                            var productText = parts[0].trim()
                             val amountText = parts[1].trim()
+                            
+                            // Clean up decimal formatting in product text (e.g., "148.258" -> "148.25")
+                            productText = productText.replace(Regex("(\\d+\\.\\d{3,})")) { matchResult ->
+                                val number = matchResult.value.toDoubleOrNull()
+                                if (number != null) {
+                                    "%.2f".format(number)
+                                } else {
+                                    matchResult.value
+                                }
+                            }
                             
                             // Draw product text on left
                             canvas.drawText(productText, 4f, y, paint)
