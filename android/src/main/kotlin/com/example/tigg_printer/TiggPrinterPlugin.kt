@@ -762,13 +762,15 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                             var productText = parts[0].trim()
                             val amountText = parts[1].trim()
                             
-                            // Clean up decimal formatting in product text (e.g., "148.258" -> "148.25")
+                            // Clean up decimal formatting in product text (truncate to 2 decimals, don't round)
                             productText = productText.replace(Regex("(\\d+\\.\\d{3,})")) { matchResult ->
-                                val number = matchResult.value.toDoubleOrNull()
-                                if (number != null) {
-                                    "%.2f".format(number)
+                                val numberStr = matchResult.value
+                                val dotIndex = numberStr.indexOf('.')
+                                if (dotIndex != -1 && dotIndex + 3 < numberStr.length) {
+                                    // Truncate to 2 decimal places without rounding
+                                    numberStr.substring(0, dotIndex + 3)
                                 } else {
-                                    matchResult.value
+                                    numberStr
                                 }
                             }
                             
