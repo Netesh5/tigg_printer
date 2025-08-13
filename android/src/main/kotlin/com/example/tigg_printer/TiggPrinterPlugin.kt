@@ -568,6 +568,11 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             val formattedLines = parseEscPosWithFormatting(escPosString, paperSize).toMutableList()
             Log.d("TiggPrinter", "Parsed ${formattedLines.size} formatted lines")
             
+            // Debug: Log each parsed line to identify the source of "0.00"
+            for ((index, line) in formattedLines.withIndex()) {
+                Log.d("TiggPrinter", "Parsed Line $index: '${line.text}' (align=${line.alignment}, bold=${line.isBold}, double=${line.isDoubleSize})")
+            }
+            
             // Process lines to detect and merge table structures based on ESC/POS row/column layout
             val processedLines = mutableListOf<FormattedLine>()
             var i = 0
@@ -677,25 +682,36 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             // Use processed lines for rendering
             val finalLines = processedLines
             
-            for ((index, line) in finalLines.withIndex()) {
+            // Filter out standalone "0.00" lines that don't add value
+            val filteredLines = finalLines.filter { line ->
+                val trimmedText = line.text.trim()
+                if (trimmedText == "0.00") {
+                    Log.d("TiggPrinter", "Filtering out standalone '0.00' line")
+                    false
+                } else {
+                    true
+                }
+            }.toMutableList()
+            
+            for ((index, line) in filteredLines.withIndex()) {
                 Log.d("TiggPrinter", "Final Line $index: '${line.text}' (align=${line.alignment}, bold=${line.isBold}, double=${line.isDoubleSize})")
             }
             
-            if (finalLines.isEmpty()) {
+            if (filteredLines.isEmpty()) {
                 Log.w("TiggPrinter", "No content extracted from ESC/POS data - using simple extraction")
                 // Create a simple fallback line to ensure something prints
-                finalLines.add(FormattedLine("ESC/POS Data (${escPosString.length} bytes)", 1, false, false))
+                filteredLines.add(FormattedLine("ESC/POS Data (${escPosString.length} bytes)", 1, false, false))
                 Log.d("TiggPrinter", "Using minimal fallback content")
             }
             
             // Add 3 empty lines at the bottom for easier paper handling
-            finalLines.add(FormattedLine("", 0, false, false))
-            finalLines.add(FormattedLine("", 0, false, false))
-            finalLines.add(FormattedLine("", 0, false, false))
+            filteredLines.add(FormattedLine("", 0, false, false))
+            filteredLines.add(FormattedLine("", 0, false, false))
+            filteredLines.add(FormattedLine("", 0, false, false))
            
             
             // NEVER use the old fallback - always use our small font rendering
-            Log.d("TiggPrinter", "Using main rendering path with ${finalLines.size} lines")
+            Log.d("TiggPrinter", "Using main rendering path with ${filteredLines.size} lines")
             
             // Calculate total height needed
             val baseTextSize = 20.0f // Back to 20px as requested
@@ -703,7 +719,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             val lineSpacing = 1.2f // Slightly more spacing for larger font
             var totalHeight = 10f // Reduced top padding
             
-            for (line in finalLines) {
+            for (line in filteredLines) {
                 val textSize = when {
                     line.isDoubleSize -> baseTextSize * 1.5f
                     else -> baseTextSize
@@ -720,7 +736,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             
             // Draw each line with exact formatting - no modifications
             var y = baseTextSize * lineSpacing + 10f // Reduced initial Y position
-            for (line in finalLines) {
+            for (line in filteredLines) {
                 if (line.text.isNotEmpty()) {
                     val paint = Paint().apply {
                         color = Color.BLACK
