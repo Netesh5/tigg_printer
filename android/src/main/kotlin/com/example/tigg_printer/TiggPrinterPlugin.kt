@@ -526,7 +526,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
             
             val lineHeight = paint.textSize + 8 // Increase line spacing
-            val bottomFeedSpace = 150 // Add extra space at bottom for paper feed effect
+            val bottomFeedSpace = 100 // Reduced bottom space since ESC/POS uses empty lines
             val totalHeight = (lines.size * lineHeight + padding * 2 + bottomFeedSpace).toInt()
             
             // Create bitmap with proper dimensions
@@ -688,6 +688,12 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 Log.d("TiggPrinter", "Using minimal fallback content")
             }
             
+            // Add 3 empty lines at the bottom for easier paper handling
+            finalLines.add(FormattedLine("", 0, false, false))
+            finalLines.add(FormattedLine("", 0, false, false))
+            finalLines.add(FormattedLine("", 0, false, false))
+            Log.d("TiggPrinter", "Added 3 empty lines for paper feed")
+            
             // NEVER use the old fallback - always use our small font rendering
             Log.d("TiggPrinter", "Using main rendering path with ${finalLines.size} lines")
             
@@ -705,7 +711,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 // Normal height calculation without extra wrapping space
                 totalHeight += textSize * lineSpacing
             }
-            totalHeight += 120f // Increased bottom padding for easier paper handling
+            // totalHeight += 80f // Reduced bottom padding since we have empty lines for paper handling
             
             // Create bitmap
             val bitmap = Bitmap.createBitmap(paperSize, totalHeight.toInt(), Bitmap.Config.ARGB_8888)
