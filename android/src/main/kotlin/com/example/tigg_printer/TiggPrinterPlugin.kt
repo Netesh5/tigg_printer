@@ -692,7 +692,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             finalLines.add(FormattedLine("", 0, false, false))
             finalLines.add(FormattedLine("", 0, false, false))
             finalLines.add(FormattedLine("", 0, false, false))
-            Log.d("TiggPrinter", "Added 3 empty lines for paper feed")
+           
             
             // NEVER use the old fallback - always use our small font rendering
             Log.d("TiggPrinter", "Using main rendering path with ${finalLines.size} lines")
@@ -711,7 +711,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 // Normal height calculation without extra wrapping space
                 totalHeight += textSize * lineSpacing
             }
-            // totalHeight += 80f // Reduced bottom padding since we have empty lines for paper handling
+             totalHeight += 80f // Reduced bottom padding since we have empty lines for paper handling
             
             // Create bitmap
             val bitmap = Bitmap.createBitmap(paperSize, totalHeight.toInt(), Bitmap.Config.ARGB_8888)
