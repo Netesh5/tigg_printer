@@ -571,10 +571,6 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             // Debug: Log each parsed line to identify parsing issues
             for ((index, line) in formattedLines.withIndex()) {
                 Log.d("TiggPrinter", "Parsed Line $index: '${line.text}' (align=${line.alignment}, bold=${line.isBold}, double=${line.isDoubleSize})")
-                // Special debug for lines that look like they might be split incorrectly
-                if (line.text.contains(",") || line.text.matches(Regex("\\d+\\.\\d+"))) {
-                    Log.d("TiggPrinter", "*** POTENTIAL RATE/NUMBER LINE: '${line.text}' ***")
-                }
             }
             
             // Process lines to detect and merge table structures based on ESC/POS row/column layout
@@ -597,25 +593,6 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                             i += 2
                             continue
                         }
-                    }
-                }
-                
-                // Generic handling for split rates: detect line ending with comma followed by decimal number
-                if (currentText.endsWith(",") && i + 1 < formattedLines.size) {
-                    val nextLine = formattedLines[i + 1]
-                    val nextText = nextLine.text.trim()
-                    
-                    // Check if next line is a decimal number (the split part of the rate)
-                    if (nextText.matches(Regex("\\d+\\.\\d+"))) {
-                        // Merge the split parts: remove comma and append the decimal
-                        val mergedText = currentText.dropLast(1) + nextText  // "1," + "35.60" = "135.60"
-                        val mergedLine = FormattedLine(mergedText, currentLine.alignment, currentLine.isBold, currentLine.isDoubleSize)
-                        
-                        processedLines.add(mergedLine)
-                        Log.d("TiggPrinter", "*** MERGED SPLIT RATE: '${currentText}' + '${nextText}' -> '${mergedText}' ***")
-                        
-                        i += 2  // Skip both current and next line since we merged them
-                        continue
                     }
                 }
                 
