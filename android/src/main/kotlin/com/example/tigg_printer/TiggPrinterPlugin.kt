@@ -999,7 +999,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                             }
                             0x61 -> { // ESC a n - Set alignment
                                 if (i + 2 < bytes.size) {
-                                    flushTextBuffer()
+                                    // Don't flush text buffer on alignment changes - they can happen within same row
                                     val alignValue = bytes[i + 2].toInt() and 0xFF
                                     // ESC/POS alignment: 0=left, 1=center, 2=right
                                     // But sometimes we get ASCII values, so convert properly
@@ -1009,7 +1009,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                                         50, 2 -> 2 // '2' (ASCII 50) or 2 = right
                                         else -> alignValue // Keep original for debugging
                                     }
-                                    Log.d("TiggPrinter", "ESC a - Set alignment: raw=$alignValue -> mapped=$currentAlignment")
+                                    Log.d("TiggPrinter", "ESC a - Set alignment: raw=$alignValue -> mapped=$currentAlignment (no flush)")
                                     i += 3
                                 } else i += 2
                             }
