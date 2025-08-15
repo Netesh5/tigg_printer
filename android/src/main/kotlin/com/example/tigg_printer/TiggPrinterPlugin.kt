@@ -600,6 +600,25 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     }
                 }
                 
+                // Generic handling for split rates: detect line ending with comma followed by decimal number
+                if (currentText.endsWith(",") && i + 1 < formattedLines.size) {
+                    val nextLine = formattedLines[i + 1]
+                    val nextText = nextLine.text.trim()
+                    
+                    // Check if next line is a decimal number (the split part of the rate)
+                    if (nextText.matches(Regex("\\d+\\.\\d+"))) {
+                        // Merge the split parts: remove comma and append the decimal
+                        val mergedText = currentText.dropLast(1) + nextText  // "1," + "35.60" = "135.60"
+                        val mergedLine = FormattedLine(mergedText, currentLine.alignment, currentLine.isBold, currentLine.isDoubleSize)
+                        
+                        processedLines.add(mergedLine)
+                        Log.d("TiggPrinter", "*** MERGED SPLIT RATE: '${currentText}' + '${nextText}' -> '${mergedText}' ***")
+                        
+                        i += 2  // Skip both current and next line since we merged them
+                        continue
+                    }
+                }
+                
                 // Enhanced product detection for ESC/POS row structure
                 if (!currentText.contains("---") && 
                     currentText.isNotEmpty() &&
