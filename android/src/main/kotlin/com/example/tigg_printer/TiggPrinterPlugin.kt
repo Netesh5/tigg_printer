@@ -568,9 +568,13 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             val formattedLines = parseEscPosWithFormatting(escPosString, paperSize).toMutableList()
             Log.d("TiggPrinter", "Parsed ${formattedLines.size} formatted lines")
             
-            // Debug: Log each parsed line to identify the source of "0.00"
+            // Debug: Log each parsed line to identify parsing issues
             for ((index, line) in formattedLines.withIndex()) {
                 Log.d("TiggPrinter", "Parsed Line $index: '${line.text}' (align=${line.alignment}, bold=${line.isBold}, double=${line.isDoubleSize})")
+                // Special debug for lines that look like they might be split incorrectly
+                if (line.text.contains(",") || line.text.matches(Regex("\\d+\\.\\d+"))) {
+                    Log.d("TiggPrinter", "*** POTENTIAL RATE/NUMBER LINE: '${line.text}' ***")
+                }
             }
             
             // Process lines to detect and merge table structures based on ESC/POS row/column layout
@@ -1137,8 +1141,7 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 // Control characters
                 0x0A -> { // LF - Line feed
                     flushTextBuffer()
-                    // Don't add automatic empty lines - only if explicitly in the data
-                    Log.d("TiggPrinter", "LF - Line feed (no automatic empty line)")
+                    Log.d("TiggPrinter", "LF - Line feed")
                     i++
                 }
                 0x0D -> { // CR - Carriage return
