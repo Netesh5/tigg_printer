@@ -1,7 +1,7 @@
 import 'tigg_printer_platform_interface.dart';
 
 export 'tigg_printer_platform_interface.dart'
-    show PrintResult, TiggPrinterException;
+    show PrintResult, TiggPrinterException, DeviceType;
 
 class TiggPrinter {
   TiggPrinter._();
@@ -12,6 +12,11 @@ class TiggPrinter {
   /// Get the platform version
   static Future<String?> getPlatformVersion() {
     return TiggPrinterPlatform.instance.getPlatformVersion();
+  }
+
+  /// Get the current device type for conditional printing logic
+  static Future<DeviceType> getDeviceType() {
+    return TiggPrinterPlatform.instance.getDeviceType();
   }
 
   /// Bind to printer service with intelligent retry logic
@@ -176,5 +181,15 @@ class TiggPrinter {
   /// Check system-level printer services
   static Future<Map<String, dynamic>> checkSystemServices() {
     return TiggPrinterPlatform.instance.checkSystemServices();
+  }
+
+  /// Get available printers and their status
+  static Future<Map<String, dynamic>> getAvailablePrinters() {
+    return TiggPrinterPlatform.instance.getAvailablePrinters();
+  }
+
+  /// Select a specific printer by ID (for multi-printer devices like Tactilion)
+  static Future<Map<String, dynamic>> selectPrinter({required int printerId}) {
+    return TiggPrinterPlatform.instance.selectPrinter(printerId: printerId);
   }
 }

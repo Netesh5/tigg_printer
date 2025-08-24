@@ -2,6 +2,13 @@ import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 import 'tigg_printer_method_channel.dart';
 
+/// Supported device types for printing
+enum DeviceType {
+  fewaPos, // Original FewaPos device
+  tactilion, // Tactilion device
+  unknown, // Unknown or unsupported device
+}
+
 /// The result of a print operation
 class PrintResult {
   final bool success;
@@ -49,6 +56,11 @@ abstract class TiggPrinterPlatform extends PlatformInterface {
   /// Get the platform version (for debugging/info purposes)
   Future<String?> getPlatformVersion() {
     throw UnimplementedError('platformVersion() has not been implemented.');
+  }
+
+  /// Detect the current device type
+  Future<DeviceType> getDeviceType() {
+    throw UnimplementedError('getDeviceType() has not been implemented.');
   }
 
   /// Print a base64 encoded image
@@ -103,5 +115,16 @@ abstract class TiggPrinterPlatform extends PlatformInterface {
   /// Check system services and packages related to TiggPrinter
   Future<Map<String, dynamic>> checkSystemServices() {
     throw UnimplementedError('checkSystemServices() has not been implemented.');
+  }
+
+  /// Get available printers and their status
+  Future<Map<String, dynamic>> getAvailablePrinters() {
+    throw UnimplementedError(
+        'getAvailablePrinters() has not been implemented.');
+  }
+
+  /// Select a specific printer by ID (for multi-printer devices)
+  Future<Map<String, dynamic>> selectPrinter({required int printerId}) {
+    throw UnimplementedError('selectPrinter() has not been implemented.');
   }
 }

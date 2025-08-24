@@ -9,6 +9,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
+import android.os.Build
 import android.os.Bundle
 import android.os.RemoteException
 import android.util.Base64
@@ -17,6 +18,20 @@ import androidx.annotation.NonNull
 import com.example.clientapp.AppService
 import com.example.clientapp.utils.BaseUtils
 import acquire.client_connection.IPaymentCallback
+// Tactilion SDK imports
+import com.basewin.printService.PrintService
+import com.basewin.printService.PrintParams
+import com.basewin.aidl.OnPrinterListener
+import com.basewin.services.DeviceInfoBinder
+// ServiceManager API imports (proper Tactilion API)
+import com.basewin.services.ServiceManager
+import com.basewin.services.PrinterBinder
+import com.basewin.aidl.OnPrinterListener as BasewinPrinterListener
+import com.basewin.models.TextPrintLine
+import com.basewin.models.BitmapPrintLine
+import com.basewin.models.PrintLine
+import com.basewin.define.PrinterInfo
+import com.basewin.interfaces.OnInitListener
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -25,99 +40,1037 @@ import io.flutter.plugin.common.MethodChannel.Result
 
 /** TiggPrinterPlugin */
 
+enum class DeviceType {
+    FEWAPOS,
+    TACTILION,
+    UNKNOWN
+}
+
 class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     private lateinit var channel: MethodChannel
     private lateinit var context: Context
+    private var detectedDeviceType: DeviceType = DeviceType.UNKNOWN
+    
+    // Tactilion SDK instances
+    private var tactilionPrintService: PrintService? = null
+    private var deviceInfoBinder: DeviceInfoBinder? = null
+    // ServiceManager API instances (proper Tactilion API)
+    private var serviceManager: ServiceManager? = null
+    private var printerBinder: PrinterBinder? = null
+    private var isServiceManagerInitialized = false
 
     override fun onAttachedToEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
         context = binding.applicationContext
         channel = MethodChannel(binding.binaryMessenger, "tigg_printer")
         channel.setMethodCallHandler(this)
         
-
+        // Detect device type asynchronously
         Thread {
             try {
-                Log.i("TiggPrinter", "Initializing AppService in background...")
-                AppService.me().init(context)
-                AppService.me().setPackageName("com.fewapay.cplus")
+                detectedDeviceType = detectDeviceType()
+                Log.i("TiggPrinter", "Detected device type: $detectedDeviceType")
                 
-                
-                Log.i("TiggPrinter", "Attempting initial service bind...")
-                val bindResult = AppService.me().bindService()
-                Log.i("TiggPrinter", "Initial service bind result: $bindResult")
-
-                Thread.sleep(1000)
-                val isConnected = AppService.me()?.isServiceConnected() ?: false
-                Log.i("TiggPrinter", "Initial service connection status: $isConnected")
-                
-                if (!isConnected) {
-                    Log.w("TiggPrinter", "Service not connected after initial bind. Will retry on demand.")
+                when (detectedDeviceType) {
+                    DeviceType.FEWAPOS -> {
+                        initializeFewaPos()
+                    }
+                    DeviceType.TACTILION -> {
+                        // Initialize Tactilion in background thread to prevent blocking
+                        Thread {
+                            initializeTactilion()
+                        }.start()
+                    }
+                    DeviceType.UNKNOWN -> {
+                        Log.w("TiggPrinter", "Unknown device type. Attempting FewaPos initialization as fallback.")
+                        initializeFewaPos()
+                    }
                 }
-                
             } catch (e: Exception) {
-                Log.e("TiggPrinter", "Failed to initialize AppService: ${e.message}", e)
+                Log.e("TiggPrinter", "Failed to initialize printer service: ${e.message}", e)
             }
         }.start()
+    }
+    
+    private fun detectDeviceType(): DeviceType {
+        try {
+            // Method 1: Check device manufacturer and model
+            val manufacturer = Build.MANUFACTURER.lowercase()
+            val model = Build.MODEL.lowercase()
+            val product = Build.PRODUCT.lowercase()
+            
+            Log.d("TiggPrinter", "Device info - Manufacturer: $manufacturer, Model: $model, Product: $product")
+            
+            // Check for Tactilion device patterns
+            if (manufacturer.contains("tactilion") || 
+                model.contains("tactilion") || 
+                product.contains("tactilion") ||
+                manufacturer.contains("basewin") ||
+                model.contains("basewin")) {
+                Log.d("TiggPrinter", "Tactilion device detected by manufacturer/model")
+                return DeviceType.TACTILION
+            }
+            
+            // Method 2: Try to instantiate Tactilion SDK classes (without initializing PrintService)
+            try {
+                // Try DeviceInfoBinder first as it's less likely to have permission issues
+                val testDeviceInfoBinder = DeviceInfoBinder(context)
+                try {
+                    val deviceType = testDeviceInfoBinder.getDeviceType()
+                    Log.d("TiggPrinter", "Tactilion DeviceInfoBinder successful, device type: $deviceType")
+                    return DeviceType.TACTILION
+                } catch (e: SecurityException) {
+                    Log.d("TiggPrinter", "Tactilion DeviceInfoBinder available but permission denied: ${e.message}")
+                    // Device is Tactilion but permissions are missing
+                    return DeviceType.TACTILION
+                } catch (e: Exception) {
+                    Log.d("TiggPrinter", "Tactilion DeviceInfoBinder failed: ${e.message}")
+                }
+            } catch (e: Exception) {
+                Log.d("TiggPrinter", "Tactilion SDK classes not available: ${e.message}")
+            }
+            
+            // Method 3: Check for FewaPos specific packages/classes
+            try {
+                AppService.me().init(context)
+                Log.d("TiggPrinter", "FewaPos AppService available")
+                return DeviceType.FEWAPOS
+            } catch (e: Exception) {
+                Log.d("TiggPrinter", "FewaPos SDK not available: ${e.message}")
+            }
+            
+            return DeviceType.UNKNOWN
+            
+        } catch (e: Exception) {
+            Log.e("TiggPrinter", "Error detecting device type: ${e.message}", e)
+            return DeviceType.UNKNOWN
+        }
+    }
+    
+    private fun initializeFewaPos() {
+        try {
+            Log.i("TiggPrinter", "Initializing FewaPos SDK...")
+            AppService.me().init(context)
+            AppService.me().setPackageName("com.fewapay.cplus")
+            
+            Log.i("TiggPrinter", "Attempting initial FewaPos service bind...")
+            val bindResult = AppService.me().bindService()
+            Log.i("TiggPrinter", "Initial FewaPos service bind result: $bindResult")
+
+            Thread.sleep(1000)
+            val isConnected = AppService.me()?.isServiceConnected() ?: false
+            Log.i("TiggPrinter", "Initial FewaPos service connection status: $isConnected")
+            
+            if (!isConnected) {
+                Log.w("TiggPrinter", "FewaPos service not connected after initial bind. Will retry on demand.")
+            }
+        } catch (e: Exception) {
+            Log.e("TiggPrinter", "Failed to initialize FewaPos: ${e.message}", e)
+        }
+    }
+    
+    private fun initializeTactilion() {
+        try {
+            Log.i("TiggPrinter", "Initializing Tactilion SDK...")
+            
+            // Initialize DeviceInfoBinder first (less likely to have permission issues)
+            try {
+                deviceInfoBinder = DeviceInfoBinder(context)
+                Log.i("TiggPrinter", "Tactilion DeviceInfoBinder initialized successfully")
+            } catch (securityException: SecurityException) {
+                Log.w("TiggPrinter", "DeviceInfoBinder permission issue: ${securityException.message}")
+                deviceInfoBinder = null
+            } catch (e: Exception) {
+                Log.w("TiggPrinter", "DeviceInfoBinder initialization failed: ${e.message}")
+                deviceInfoBinder = null
+            }
+            
+            // For now, skip ServiceManager initialization completely due to permission issues
+            // The ServiceManager requires system-level permissions that we don't have
+            Log.w("TiggPrinter", "Skipping ServiceManager initialization due to known permission issues")
+            Log.w("TiggPrinter", "Tactilion device detected but SDK requires system-level permissions")
+            Log.w("TiggPrinter", "App may need to be signed with Tactilion certificates or installed as system app")
+            
+            serviceManager = null
+            printerBinder = null
+            isServiceManagerInitialized = false
+            
+            // Try the old PrintService approach as fallback
+            try {
+                Log.d("TiggPrinter", "Attempting PrintService initialization as fallback...")
+                tactilionPrintService = PrintService.getInstance()
+                tactilionPrintService?.cleanCache()
+                Log.i("TiggPrinter", "Tactilion PrintService fallback initialized successfully")
+            } catch (securityException: SecurityException) {
+                Log.e("TiggPrinter", "PrintService also requires permissions: ${securityException.message}")
+                tactilionPrintService = null
+            } catch (e: Exception) {
+                Log.e("TiggPrinter", "PrintService fallback failed: ${e.message}")
+                tactilionPrintService = null
+            }
+            
+            Log.i("TiggPrinter", "Tactilion SDK initialization completed with limited functionality")
+            
+        } catch (e: Exception) {
+            Log.e("TiggPrinter", "Failed to initialize Tactilion: ${e.message}", e)
+            tactilionPrintService = null
+            deviceInfoBinder = null
+            serviceManager = null
+            printerBinder = null
+            isServiceManagerInitialized = false
+        }
+    }
+    
+    private fun initializeServiceManager() {
+        try {
+            Log.d("TiggPrinter", "Attempting ServiceManager initialization...")
+            
+            // Try to get ServiceManager instance first
+            serviceManager = ServiceManager.getInstence()
+            
+            if (serviceManager == null) {
+                Log.e("TiggPrinter", "ServiceManager.getInstence() returned null")
+                isServiceManagerInitialized = false
+                return
+            }
+            
+            // Try the simple init first (less likely to have permission issues)
+            try {
+                Log.d("TiggPrinter", "Trying ServiceManager.init() method...")
+                serviceManager?.init(context)
+                isServiceManagerInitialized = true
+                Log.i("TiggPrinter", "ServiceManager initialized successfully with init() method")
+                
+                // Try to initialize printer after successful init
+                try {
+                    initializePrinter()
+                } catch (e: Exception) {
+                    Log.e("TiggPrinter", "Failed to initialize printer after ServiceManager init: ${e.message}")
+                }
+                return
+                
+            } catch (securityException: SecurityException) {
+                Log.w("TiggPrinter", "ServiceManager.init() failed with security exception: ${securityException.message}")
+                // Fall through to try forceinit
+            } catch (e: Exception) {
+                Log.w("TiggPrinter", "ServiceManager.init() failed: ${e.message}")
+                // Fall through to try forceinit
+            }
+            
+            // If init() failed, try forceinit in a background thread with timeout
+            Log.d("TiggPrinter", "Trying ServiceManager.forceinit() method...")
+            
+            // Run forceinit in a separate thread with timeout to prevent blocking
+            val initThread = Thread {
+                try {
+                    serviceManager?.forceinit(context, object : OnInitListener {
+                        override fun onSucc() {
+                            Log.i("TiggPrinter", "ServiceManager forceinit successful")
+                            isServiceManagerInitialized = true
+                            
+                            // Initialize printer after successful service init
+                            try {
+                                initializePrinter()
+                            } catch (e: Exception) {
+                                Log.e("TiggPrinter", "Failed to initialize printer after ServiceManager forceinit: ${e.message}")
+                            }
+                        }
+                        
+                        override fun onFailed() {
+                            Log.e("TiggPrinter", "ServiceManager forceinit failed")
+                            isServiceManagerInitialized = false
+                        }
+                    })
+                } catch (securityException: SecurityException) {
+                    Log.e("TiggPrinter", "ServiceManager forceinit security exception: ${securityException.message}")
+                    isServiceManagerInitialized = false
+                } catch (e: Exception) {
+                    Log.e("TiggPrinter", "ServiceManager forceinit exception: ${e.message}")
+                    isServiceManagerInitialized = false
+                }
+            }
+            
+            initThread.start()
+            
+            // Wait for a reasonable time for initialization
+            try {
+                initThread.join(3000) // Wait up to 3 seconds
+                if (initThread.isAlive) {
+                    Log.w("TiggPrinter", "ServiceManager initialization timed out")
+                    initThread.interrupt()
+                }
+            } catch (e: InterruptedException) {
+                Log.w("TiggPrinter", "ServiceManager initialization interrupted")
+            }
+            
+        } catch (securityException: SecurityException) {
+            Log.e("TiggPrinter", "Security permission error during ServiceManager initialization: ${securityException.message}")
+            Log.e("TiggPrinter", "This indicates the app lacks system-level permissions required by Tactilion SDK")
+            serviceManager = null
+            isServiceManagerInitialized = false
+        } catch (e: Exception) {
+            Log.e("TiggPrinter", "Failed to initialize ServiceManager: ${e.message}", e)
+            serviceManager = null
+            isServiceManagerInitialized = false
+        }
+    }
+    
+    private fun initializePrinter() {
+        try {
+            Log.d("TiggPrinter", "Initializing Tactilion printer...")
+            
+            if (serviceManager == null) {
+                Log.e("TiggPrinter", "ServiceManager is null, cannot initialize printer")
+                return
+            }
+            
+            // Get printer binder
+            printerBinder = serviceManager?.getPrinter()
+            
+            if (printerBinder != null) {
+                Log.d("TiggPrinter", "PrinterBinder obtained successfully")
+                
+                // Configure printer settings based on the sample code
+                printerBinder?.setPrintGray(1000)
+                printerBinder?.setLineSpace(25)
+                printerBinder?.setPrintTypesettingType(1) // PRINTERLAYOUT_TYPESETTING
+                printerBinder?.cleanCache()
+                
+                // Set default font if available
+                try {
+                    printerBinder?.setPrintFontByAsserts("arial.ttf")
+                } catch (e: Exception) {
+                    Log.w("TiggPrinter", "Could not set custom font: ${e.message}")
+                }
+                
+                Log.i("TiggPrinter", "Tactilion printer initialized successfully")
+                
+                // Get available printers info
+                val printerInfo = printerBinder?.getPrinterInfo()
+                Log.d("TiggPrinter", "Available printers: ${printerInfo?.size ?: 0}")
+                printerInfo?.forEachIndexed { index, info ->
+                    Log.d("TiggPrinter", "Printer $index: ${info}")
+                }
+                
+            } else {
+                Log.e("TiggPrinter", "Failed to get PrinterBinder from ServiceManager")
+            }
+            
+        } catch (securityException: SecurityException) {
+            Log.e("TiggPrinter", "Security permission error during printer initialization: ${securityException.message}")
+            printerBinder = null
+        } catch (e: Exception) {
+            Log.e("TiggPrinter", "Failed to initialize printer: ${e.message}", e)
+            printerBinder = null
+        }
+    }
+    
+    private fun ensureTactilionPrintService(): Boolean {
+        // First check if we have any working service
+        if (isServiceManagerInitialized && printerBinder != null) {
+            return true
+        }
+        
+        if (tactilionPrintService != null) {
+            return true
+        }
+        
+        // Try PrintService approach only (avoid ServiceManager due to permission issues)
+        if (tactilionPrintService == null) {
+            try {
+                Log.d("TiggPrinter", "Attempting PrintService initialization...")
+                tactilionPrintService = PrintService.getInstance()
+                tactilionPrintService?.cleanCache()
+                Log.d("TiggPrinter", "Tactilion PrintService initialized successfully")
+                return true
+            } catch (securityException: SecurityException) {
+                Log.e("TiggPrinter", "Security permission error during Tactilion PrintService initialization: ${securityException.message}")
+                Log.e("TiggPrinter", "This device appears to be a Tactilion device but lacks the required system-level permissions.")
+                Log.e("TiggPrinter", "The app may need to be signed with Tactilion's certificates or installed as a system app.")
+                tactilionPrintService = null
+                return false
+            } catch (e: Exception) {
+                Log.e("TiggPrinter", "Failed to initialize Tactilion PrintService: ${e.message}", e)
+                tactilionPrintService = null
+                return false
+            }
+        }
+        return tactilionPrintService != null
+    }
+    
+    // Manual ServiceManager initialization method (can be called explicitly if needed)
+    private fun tryServiceManagerInitialization(): Boolean {
+        if (isServiceManagerInitialized && printerBinder != null) {
+            return true
+        }
+        
+        try {
+            Log.d("TiggPrinter", "Manual ServiceManager initialization attempt...")
+            initializeServiceManager()
+            return isServiceManagerInitialized && printerBinder != null
+        } catch (e: Exception) {
+            Log.e("TiggPrinter", "Manual ServiceManager initialization failed: ${e.message}")
+            return false
+        }
+    }
+    
+    private fun bindFewaPos(result: MethodChannel.Result) {
+        try {
+            // First check if AppService is initialized
+            if (AppService.me() == null) {
+                Log.e("TiggPrinter", "FewaPos AppService is not initialized")
+                context.mainExecutor.execute {
+                    result.error("SERVICE_NOT_INITIALIZED", "FewaPos AppService is not initialized", null)
+                }
+                return
+            }
+            
+            // Check current connection status
+            val currentStatus = AppService.me().isServiceConnected()
+            Log.i("TiggPrinter", "Current FewaPos service connection status: $currentStatus")
+            
+            if (currentStatus) {
+                context.mainExecutor.execute {
+                    result.success("FewaPos service is already connected")
+                }
+                return
+            }
+            
+            // Attempt to bind with timeout to prevent hanging
+            Log.i("TiggPrinter", "Attempting FewaPos service bind...")
+            val bindResult = AppService.me().bindService()
+            Log.i("TiggPrinter", "FewaPos bind service result: $bindResult")
+            
+            // Short wait for connection
+            Thread.sleep(1000)
+            val finalStatus = AppService.me()?.isServiceConnected() ?: false
+            Log.i("TiggPrinter", "FewaPos service connection status after bind: $finalStatus")
+            
+            // Return result on main thread
+            context.mainExecutor.execute {
+                if (finalStatus) {
+                    result.success("FewaPos service bound and connected successfully")
+                } else {
+                    result.error("BIND_FAILED", "FewaPos service bind initiated but connection failed. TiggPrinter service may not be running.", null)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("TiggPrinter", "Failed to bind FewaPos service", e)
+            context.mainExecutor.execute {
+                result.error("BIND_ERROR", "Error during FewaPos service binding: ${getErrorMessage(e)}", null)
+            }
+        }
+    }
+    
+    private fun bindTactilion(result: MethodChannel.Result) {
+        try {
+            // Tactilion doesn't require a separate bind operation
+            // The PrintService.getInstance() call during initialization is sufficient
+            if (tactilionPrintService != null) {
+                context.mainExecutor.execute {
+                    result.success("Tactilion service is ready")
+                }
+            } else {
+                // Try to reinitialize
+                try {
+                    tactilionPrintService = PrintService.getInstance()
+                    if (tactilionPrintService != null) {
+                        context.mainExecutor.execute {
+                            result.success("Tactilion service initialized successfully")
+                        }
+                    } else {
+                        context.mainExecutor.execute {
+                            result.error("BIND_FAILED", "Failed to initialize Tactilion print service", null)
+                        }
+                    }
+                } catch (securityException: SecurityException) {
+                    Log.e("TiggPrinter", "Security permission error for Tactilion SDK: ${securityException.message}")
+                    context.mainExecutor.execute {
+                        result.error("PERMISSION_DENIED", "Missing required permissions for Tactilion SDK. Please add com.pos.permission.SECURITY and other required permissions to AndroidManifest.xml", securityException.message)
+                    }
+                } catch (e: Exception) {
+                    Log.e("TiggPrinter", "Failed to initialize Tactilion print service: ${e.message}", e)
+                    context.mainExecutor.execute {
+                        result.error("INIT_FAILED", "Failed to initialize Tactilion print service: ${getErrorMessage(e)}", null)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("TiggPrinter", "Failed to bind Tactilion service", e)
+            context.mainExecutor.execute {
+                result.error("BIND_ERROR", "Error during Tactilion service binding: ${getErrorMessage(e)}", null)
+            }
+        }
+    }
+    
+    private fun printBase64ImageFewaPos(base64Image: String, textSize: Int, result: MethodChannel.Result) {
+        try {
+            if (!BaseUtils.isValidBase64(base64Image)) {
+                result.error("INVALID_BASE64", "Invalid Base64 image data format", null)
+                return
+            }
+
+            // Check if service is available and connected
+            if (AppService.me() == null) {
+                result.error("SERVICE_UNAVAILABLE", "FewaPos printer service is not initialized", null)
+                return
+            }
+            
+            if (!AppService.me().isServiceConnected()) {
+                result.error("SERVICE_NOT_CONNECTED", "FewaPos printer service is not connected. Please bind service first.", null)
+                return
+            }
+
+            // Convert base64 to bitmap
+            val decodedBytes = Base64.decode(base64Image, Base64.DEFAULT)
+            val bitmap = BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
+            
+            if (bitmap == null) {
+                result.error("INVALID_IMAGE", "Could not decode base64 image data", null)
+                return
+            }
+
+            // Use the startPrinting method from AppService for bitmap printing
+            AppService.me().startPrinting(bitmap, true, object : IPaymentCallback.Stub() {
+                override fun onSuccess(success: Boolean, message: String?) {
+                    // Ensure callback runs on main thread
+                    context.mainExecutor.execute {
+                        if (success) {
+                            result.success(mapOf(
+                                "success" to true,
+                                "message" to "Image printed successfully with FewaPos"
+                            ))
+                        } else {
+                            result.error("PRINT_FAILED", message ?: "FewaPos print operation failed", null)
+                        }
+                    }
+                }
+                
+                override fun onResponse(response: Bundle?) {
+                    // Handle any additional response data if needed
+                    Log.d("TiggPrinter", "FewaPos print response received: $response")
+                }
+            })
+        } catch (e: RemoteException) {
+            result.error("REMOTE_EXCEPTION", "FewaPos printer service communication error: ${e.message}", null)
+        } catch (e: IllegalArgumentException) {
+            result.error("INVALID_INPUT", "Invalid input parameters: ${e.message}", null)
+        } catch (e: OutOfMemoryError) {
+            result.error("MEMORY_ERROR", "Not enough memory to process image: ${e.message}", null)
+        } catch (e: Exception) {
+            result.error("PRINT_EXCEPTION", "Unexpected error during FewaPos printing: ${e.message}", null)
+        }
+    }
+    
+    private fun printBase64ImageTactilion(base64Image: String, textSize: Int, result: MethodChannel.Result) {
+        try {
+            // Ensure Tactilion service is initialized and available
+            if (!ensureTactilionPrintService()) {
+                result.error("SERVICE_UNAVAILABLE", "Tactilion printer service failed to initialize. This may be due to missing permissions or incorrect device configuration.", null)
+                return
+            }
+
+            // Convert base64 to bitmap
+            val decodedBytes = Base64.decode(base64Image, Base64.DEFAULT)
+            val bitmap = BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
+            
+            if (bitmap == null) {
+                result.error("INVALID_IMAGE", "Could not decode base64 image data", null)
+                return
+            }
+
+            // Try ServiceManager approach first (preferred)
+            if (isServiceManagerInitialized && printerBinder != null) {
+                printImageWithServiceManager(bitmap, result)
+                return
+            }
+            
+            // Fallback to old PrintService approach
+            if (tactilionPrintService != null) {
+                printImageWithPrintService(bitmap, result)
+                return
+            }
+            
+            result.error("SERVICE_UNAVAILABLE", "No Tactilion printing service available", null)
+            
+        } catch (securityException: SecurityException) {
+            Log.e("TiggPrinter", "Security permission error during Tactilion image printing: ${securityException.message}")
+            result.error("PERMISSION_DENIED", "Permission denied for Tactilion printing. Required permissions may not be granted at system level.", securityException.message)
+        } catch (e: Exception) {
+            Log.e("TiggPrinter", "Unexpected error during Tactilion image printing: ${e.message}", e)
+            result.error("PRINT_EXCEPTION", "Unexpected error during Tactilion printing: ${e.message}", null)
+        }
+    }
+    
+    private fun printImageWithServiceManager(bitmap: Bitmap, result: MethodChannel.Result) {
+        try {
+            Log.d("TiggPrinter", "Printing image with ServiceManager")
+            
+            // Clean cache before printing
+            printerBinder?.cleanCache()
+            
+            // Create bitmap print line using ServiceManager API
+            val bitmapPrintLine = BitmapPrintLine().apply {
+                setType(PrintLine.BITMAP)
+                setPosition(PrintLine.CENTER) // Center the image
+                setBitmap(bitmap)
+            }
+            
+            // Add print line to printer
+            printerBinder?.addPrintLine(bitmapPrintLine)
+            
+            // Begin printing with callback
+            printerBinder?.beginPrint(object : BasewinPrinterListener {
+                override fun onStart() {
+                    Log.d("TiggPrinter", "ServiceManager image print started")
+                }
+                
+                override fun onFinish() {
+                    Log.d("TiggPrinter", "ServiceManager image print finished successfully")
+                    context.mainExecutor.execute {
+                        result.success(mapOf(
+                            "success" to true,
+                            "message" to "Image printed successfully with Tactilion ServiceManager"
+                        ))
+                    }
+                }
+                
+                override fun onError(errorCode: Int, errorMessage: String?) {
+                    Log.e("TiggPrinter", "ServiceManager image print error: $errorCode - $errorMessage")
+                    context.mainExecutor.execute {
+                        result.error("PRINT_FAILED", "Tactilion ServiceManager image print failed: $errorMessage (Code: $errorCode)", null)
+                    }
+                }
+            })
+            
+        } catch (e: Exception) {
+            Log.e("TiggPrinter", "Error in printImageWithServiceManager: ${e.message}", e)
+            result.error("PRINT_EXCEPTION", "ServiceManager image printing error: ${e.message}", null)
+        }
+    }
+    
+    private fun printImageWithPrintService(bitmap: Bitmap, result: MethodChannel.Result) {
+        try {
+            Log.d("TiggPrinter", "Printing image with old PrintService")
+            
+            // Create print parameters for Tactilion
+            val printParams = PrintParams(0, 0, 0) // Default parameters, can be customized
+            
+            // Add bitmap to cache and print
+            tactilionPrintService?.addBmpToCurCache(bitmap, printParams)
+            tactilionPrintService?.print(object : OnPrinterListener {
+                override fun onStart() {
+                    Log.d("TiggPrinter", "PrintService image print started")
+                }
+                
+                override fun onFinish() {
+                    Log.d("TiggPrinter", "PrintService image print finished successfully")
+                    context.mainExecutor.execute {
+                        result.success(mapOf(
+                            "success" to true,
+                            "message" to "Image printed successfully with Tactilion PrintService"
+                        ))
+                    }
+                }
+                
+                override fun onError(errorCode: Int, errorMessage: String?) {
+                    Log.e("TiggPrinter", "PrintService image print error: $errorCode - $errorMessage")
+                    context.mainExecutor.execute {
+                        result.error("PRINT_FAILED", "Tactilion PrintService image print failed: $errorMessage (Code: $errorCode)", null)
+                    }
+                }
+            })
+            
+        } catch (e: Exception) {
+            Log.e("TiggPrinter", "Error in printImageWithPrintService: ${e.message}", e)
+            result.error("PRINT_EXCEPTION", "PrintService image printing error: ${e.message}", null)
+        }
+    }
+    
+    private fun printTextFewaPos(text: String, textSize: Int, paperWidth: Int, result: MethodChannel.Result) {
+        try {
+            if (AppService.me() == null) {
+                result.error("SERVICE_UNAVAILABLE", "FewaPos printer service is not initialized", null)
+                return
+            }
+
+            // Attempt re-bind if not connected
+            if (!AppService.me().isServiceConnected()) {
+                Log.w("TiggPrinter", "FewaPos service not connected. Attempting re-bind before printing...")
+                AppService.me().bindService()
+                Thread.sleep(1000) // Wait for binding
+            }
+
+            if (!AppService.me().isServiceConnected()) {
+                result.error("SERVICE_NOT_CONNECTED", "FewaPos printer service is still not connected after retry", null)
+                return
+            }
+
+            val bitmap = createTextBitmap(text, textSize, paperWidth)
+            if (bitmap == null) {
+                result.error("TEXT_RENDER_ERROR", "Could not create text bitmap", null)
+                return
+            }
+
+            Log.d("TiggPrinter", "Starting FewaPos print job...")
+
+            AppService.me().startPrinting(bitmap, false, object : IPaymentCallback.Stub() {
+                override fun onSuccess(success: Boolean, message: String?) {
+                    Log.d("TiggPrinter", "FewaPos print callback - onSuccess: success=$success, message=$message")
+                    context.mainExecutor.execute {
+                        if (success) {
+                            val response = mapOf<String, Any?>(
+                                "success" to true,
+                                "message" to (message ?: "Text printed successfully with FewaPos")
+                            )
+                            result.success(response)
+                        } else {
+                            result.error("PRINT_FAILED", message ?: "FewaPos print operation failed", null)
+                        }
+                    }
+                }
+
+                override fun onResponse(response: Bundle?) {
+                    Log.d("TiggPrinter", "FewaPos print callback - onResponse: $response")
+                }
+            })
+
+        } catch (e: RemoteException) {
+            result.error("REMOTE_EXCEPTION", "FewaPos printer service communication error: ${e.message}", null)
+        } catch (e: IllegalArgumentException) {
+            result.error("INVALID_INPUT", "Invalid input parameters: ${e.message}", null)
+        } catch (e: Exception) {
+            result.error("PRINT_EXCEPTION", "Unexpected error during FewaPos printing: ${e.message}", null)
+        }
+    }
+    
+    private fun printTextTactilion(text: String, textSize: Int, paperWidth: Int, result: MethodChannel.Result) {
+        try {
+            // Ensure Tactilion service is initialized and available
+            if (!ensureTactilionPrintService()) {
+                result.error("SERVICE_UNAVAILABLE", "Tactilion printer service failed to initialize. This may be due to missing permissions or incorrect device configuration.", null)
+                return
+            }
+
+            // Try ServiceManager approach first (preferred)
+            if (isServiceManagerInitialized && printerBinder != null) {
+                printTextWithServiceManager(text, textSize, result)
+                return
+            }
+            
+            // Fallback to old PrintService approach
+            if (tactilionPrintService != null) {
+                printTextWithPrintService(text, textSize, result)
+                return
+            }
+            
+            result.error("SERVICE_UNAVAILABLE", "No Tactilion printing service available", null)
+            
+        } catch (securityException: SecurityException) {
+            Log.e("TiggPrinter", "Security permission error during Tactilion printing: ${securityException.message}")
+            result.error("PERMISSION_DENIED", "Permission denied for Tactilion printing. Required permissions may not be granted at system level.", securityException.message)
+        } catch (e: Exception) {
+            Log.e("TiggPrinter", "Unexpected error during Tactilion text printing: ${e.message}", e)
+            result.error("PRINT_EXCEPTION", "Unexpected error during Tactilion text printing: ${e.message}", null)
+        }
+    }
+    
+    private fun printTextWithServiceManager(text: String, textSize: Int, result: MethodChannel.Result) {
+        try {
+            Log.d("TiggPrinter", "Printing text with ServiceManager: $text")
+            
+            // Clean cache before printing
+            printerBinder?.cleanCache()
+            
+            // Create text print line using ServiceManager API
+            val textPrintLine = TextPrintLine().apply {
+                setType(PrintLine.TEXT)
+                setPosition(PrintLine.LEFT) // Default to left alignment
+                setBold(true)
+                setSize(when {
+                    textSize <= 12 -> TextPrintLine.FONT_SMALL
+                    textSize <= 18 -> TextPrintLine.FONT_NORMAL
+                    else -> TextPrintLine.FONT_LARGE
+                })
+                setContent(text)
+            }
+            
+            // Add print line to printer
+            printerBinder?.addPrintLine(textPrintLine)
+            
+            // Begin printing with callback
+            printerBinder?.beginPrint(object : BasewinPrinterListener {
+                override fun onStart() {
+                    Log.d("TiggPrinter", "ServiceManager text print started")
+                }
+                
+                override fun onFinish() {
+                    Log.d("TiggPrinter", "ServiceManager text print finished successfully")
+                    context.mainExecutor.execute {
+                        result.success(mapOf(
+                            "success" to true,
+                            "message" to "Text printed successfully with Tactilion ServiceManager"
+                        ))
+                    }
+                }
+                
+                override fun onError(errorCode: Int, errorMessage: String?) {
+                    Log.e("TiggPrinter", "ServiceManager text print error: $errorCode - $errorMessage")
+                    context.mainExecutor.execute {
+                        result.error("PRINT_FAILED", "Tactilion ServiceManager print failed: $errorMessage (Code: $errorCode)", null)
+                    }
+                }
+            })
+            
+        } catch (e: Exception) {
+            Log.e("TiggPrinter", "Error in printTextWithServiceManager: ${e.message}", e)
+            result.error("PRINT_EXCEPTION", "ServiceManager printing error: ${e.message}", null)
+        }
+    }
+    
+    private fun printTextWithPrintService(text: String, textSize: Int, result: MethodChannel.Result) {
+        try {
+            Log.d("TiggPrinter", "Printing text with old PrintService: $text")
+            
+            // Create print parameters for Tactilion
+            val printParams = PrintParams(0, 0, 0) // Default parameters
+            
+            // Add text to cache and print
+            tactilionPrintService?.addTextToCurCache(text, printParams)
+            tactilionPrintService?.print(object : OnPrinterListener {
+                override fun onStart() {
+                    Log.d("TiggPrinter", "PrintService text print started")
+                }
+                
+                override fun onFinish() {
+                    Log.d("TiggPrinter", "PrintService text print finished successfully")
+                    context.mainExecutor.execute {
+                        result.success(mapOf(
+                            "success" to true,
+                            "message" to "Text printed successfully with Tactilion PrintService"
+                        ))
+                    }
+                }
+                
+                override fun onError(errorCode: Int, errorMessage: String?) {
+                    Log.e("TiggPrinter", "PrintService text print error: $errorCode - $errorMessage")
+                    context.mainExecutor.execute {
+                        result.error("PRINT_FAILED", "Tactilion PrintService print failed: $errorMessage (Code: $errorCode)", null)
+                    }
+                }
+            })
+            
+        } catch (e: Exception) {
+            Log.e("TiggPrinter", "Error in printTextWithPrintService: ${e.message}", e)
+            result.error("PRINT_EXCEPTION", "PrintService printing error: ${e.message}", null)
+        }
+    }
+    
+    private fun printRawBytesFewaPos(bytes: List<Int>, useDirectString: Boolean, textSize: Int, paperWidth: Int, result: MethodChannel.Result) {
+        try {
+            if (AppService.me() == null) {
+                result.error("SERVICE_UNAVAILABLE", "FewaPos printer service is not initialized", null)
+                return
+            }
+
+            // Attempt re-bind if not connected
+            if (!AppService.me().isServiceConnected()) {
+                Log.w("TiggPrinter", "FewaPos service not connected. Attempting re-bind before printing...")
+                AppService.me().bindService()
+                Thread.sleep(1000) // Wait for binding
+            }
+
+            if (!AppService.me().isServiceConnected()) {
+                result.error("SERVICE_NOT_CONNECTED", "FewaPos printer service is still not connected after retry", null)
+                return
+            }
+
+            // Convert List<Int> to ByteArray
+            val byteArray = bytes.map { it.toByte() }.toByteArray()
+            val escPosString = String(byteArray, Charsets.ISO_8859_1)
+            
+            Log.d("TiggPrinter", "Printing raw ESC/POS bytes with FewaPos, length: ${byteArray.size}, useDirectString: $useDirectString")
+
+            if (useDirectString) {
+                // Method 1: Direct string approach (may show default header)
+                Log.d("TiggPrinter", "*** USING FewaPos STRING METHOD (may show default header) ***")
+                AppService.me().startPrinting(escPosString, textSize, object : IPaymentCallback.Stub() {
+                    override fun onSuccess(success: Boolean, message: String?) {
+                        Log.d("TiggPrinter", "FewaPos raw bytes (string) print callback - onSuccess: success=$success, message=$message")
+                        context.mainExecutor.execute {
+                            if (success) {
+                                result.success(mapOf(
+                                    "success" to true,
+                                    "message" to "Raw bytes printed successfully with FewaPos (string method)"
+                                ))
+                            } else {
+                                result.error("PRINT_FAILED", message ?: "FewaPos raw bytes print operation failed", null)
+                            }
+                        }
+                    }
+
+                    override fun onResponse(response: Bundle?) {
+                        Log.d("TiggPrinter", "FewaPos raw bytes (string) print callback - onResponse: $response")
+                    }
+                })
+            } else {
+                // Method 2: Create minimal bitmap to avoid default header
+                Log.d("TiggPrinter", "*** USING FewaPos BITMAP METHOD (clean, no header) ***")
+                val rawBitmap = createMinimalEscPosBitmap(escPosString, paperWidth)
+                if (rawBitmap == null) {
+                    result.error("RAW_DATA_ERROR", "Could not process ESC/POS data", null)
+                    return
+                }
+                
+                AppService.me().startPrinting(rawBitmap, false, object : IPaymentCallback.Stub() {
+                    override fun onSuccess(success: Boolean, message: String?) {
+                        Log.d("TiggPrinter", "FewaPos raw bytes (bitmap) print callback - onSuccess: success=$success, message=$message")
+                        context.mainExecutor.execute {
+                            if (success) {
+                                result.success(mapOf(
+                                    "success" to true,
+                                    "message" to "Raw bytes printed successfully with FewaPos (bitmap method)"
+                                ))
+                            } else {
+                                result.error("PRINT_FAILED", message ?: "FewaPos raw bytes print operation failed", null)
+                            }
+                        }
+                    }
+
+                    override fun onResponse(response: Bundle?) {
+                        Log.d("TiggPrinter", "FewaPos raw bytes (bitmap) print callback - onResponse: $response")
+                    }
+                })
+            }
+
+        } catch (e: RemoteException) {
+            result.error("REMOTE_EXCEPTION", "FewaPos printer service communication error: ${e.message}", null)
+        } catch (e: IllegalArgumentException) {
+            result.error("INVALID_INPUT", "Invalid input parameters: ${e.message}", null)
+        } catch (e: Exception) {
+            result.error("PRINT_EXCEPTION", "Unexpected error during FewaPos raw bytes printing: ${e.message}", null)
+        }
+    }
+    
+    private fun printRawBytesTactilion(bytes: List<Int>, useDirectString: Boolean, textSize: Int, paperWidth: Int, result: MethodChannel.Result) {
+        try {
+            // Ensure Tactilion service is initialized and available
+            if (!ensureTactilionPrintService()) {
+                result.error("SERVICE_UNAVAILABLE", "Tactilion printer service failed to initialize. This may be due to missing permissions or incorrect device configuration.", null)
+                return
+            }
+
+            // Convert List<Int> to ByteArray
+            val byteArray = bytes.map { it.toByte() }.toByteArray()
+            val escPosString = String(byteArray, Charsets.ISO_8859_1)
+            
+            Log.d("TiggPrinter", "Printing raw ESC/POS bytes with Tactilion, length: ${byteArray.size}")
+
+            // For Tactilion, we can try to render the ESC/POS data as text or bitmap
+            // Since Tactilion SDK might not directly support ESC/POS commands,
+            // we'll convert the data to a bitmap for consistent printing
+            
+            val rawBitmap = createMinimalEscPosBitmap(escPosString, paperWidth)
+            if (rawBitmap == null) {
+                result.error("RAW_DATA_ERROR", "Could not process ESC/POS data for Tactilion", null)
+                return
+            }
+            
+            val printParams = PrintParams(0, 0, 0) // Default parameters
+            
+            // Add bitmap to cache and print
+            tactilionPrintService?.addBmpToCurCache(rawBitmap, printParams)
+            tactilionPrintService?.print(object : OnPrinterListener {
+                override fun onStart() {
+                    Log.d("TiggPrinter", "Tactilion raw bytes print started")
+                }
+                
+                override fun onFinish() {
+                    Log.d("TiggPrinter", "Tactilion raw bytes print finished successfully")
+                    context.mainExecutor.execute {
+                        result.success(mapOf(
+                            "success" to true,
+                            "message" to "Raw bytes printed successfully with Tactilion"
+                        ))
+                    }
+                }
+                
+                override fun onError(errorCode: Int, errorMessage: String?) {
+                    Log.e("TiggPrinter", "Tactilion raw bytes print error: $errorCode - $errorMessage")
+                    context.mainExecutor.execute {
+                        result.error("PRINT_FAILED", "Tactilion raw bytes print failed: $errorMessage (Code: $errorCode)", null)
+                    }
+                }
+            })
+            
+        } catch (securityException: SecurityException) {
+            Log.e("TiggPrinter", "Security permission error during Tactilion raw bytes printing: ${securityException.message}")
+            result.error("PERMISSION_DENIED", "Permission denied for Tactilion printing. Required permissions may not be granted at system level.", securityException.message)
+        } catch (e: Exception) {
+            Log.e("TiggPrinter", "Unexpected error during Tactilion raw bytes printing: ${e.message}", e)
+            result.error("PRINT_EXCEPTION", "Unexpected error during Tactilion raw bytes printing: ${e.message}", null)
+        }
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
+            "getDeviceType" -> {
+                val deviceTypeString = when (detectedDeviceType) {
+                    DeviceType.FEWAPOS -> "fewapos"
+                    DeviceType.TACTILION -> "tactilion"
+                    DeviceType.UNKNOWN -> "unknown"
+                }
+                result.success(deviceTypeString)
+            }
             "isPrinterAvailable" -> {
                 try {
-                    // Check if AppService is initialized and service is connected
-                    val isServiceConnected = AppService.me()?.isServiceConnected() ?: false
-                    if (isServiceConnected) {
-                        result.success(true)
-                    } else {
-                        result.error("SERVICE_UNAVAILABLE", "Printer service is not connected", null)
+                    when (detectedDeviceType) {
+                        DeviceType.FEWAPOS -> {
+                            val isServiceConnected = AppService.me()?.isServiceConnected() ?: false
+                            if (isServiceConnected) {
+                                result.success(true)
+                            } else {
+                                result.error("SERVICE_UNAVAILABLE", "FewaPos printer service is not connected", null)
+                            }
+                        }
+                        DeviceType.TACTILION -> {
+                            // For Tactilion, check both ServiceManager and fallback PrintService
+                            val serviceManagerStatus = isServiceManagerInitialized && printerBinder != null
+                            val printServiceStatus = tactilionPrintService != null
+                            
+                            if (serviceManagerStatus || printServiceStatus) {
+                                Log.i("TiggPrinter", "Tactilion printer check - ServiceManager: $serviceManagerStatus, PrintService: $printServiceStatus")
+                                result.success(true)
+                            } else {
+                                Log.w("TiggPrinter", "Tactilion printer services not available - ServiceManager: $serviceManagerStatus, PrintService: $printServiceStatus")
+                                result.error("SERVICE_UNAVAILABLE", "Tactilion printer services are not available. This may be due to missing system-level permissions.", null)
+                            }
+                        }
+                        DeviceType.UNKNOWN -> {
+                            result.error("SERVICE_UNAVAILABLE", "Unknown device type - printer service unavailable", null)
+                        }
                     }
                 } catch (e: Exception) {
-                    result.error("SERVICE_UNAVAILABLE", "Printer service check failed: ${e.message}", null)
+                    result.error("SERVICE_UNAVAILABLE", "Printer service check failed: ${getErrorMessage(e)}", null)
                 }
             }
             "bindService" -> {
                 // Execute binding in background to avoid blocking main thread
                 Thread {
                     try {
-                        Log.i("TiggPrinter", "Manual bind service requested")
+                        Log.i("TiggPrinter", "Manual bind service requested for device type: $detectedDeviceType")
                         
-                        // First check if AppService is initialized
-                        if (AppService.me() == null) {
-                            Log.e("TiggPrinter", "AppService is not initialized")
-                            context.mainExecutor.execute {
-                                result.error("SERVICE_NOT_INITIALIZED", "AppService is not initialized", null)
+                        when (detectedDeviceType) {
+                            DeviceType.FEWAPOS -> {
+                                bindFewaPos(result)
                             }
-                            return@Thread
-                        }
-                        
-                        // Check current connection status
-                        val currentStatus = AppService.me().isServiceConnected()
-                        Log.i("TiggPrinter", "Current service connection status: $currentStatus")
-                        
-                        if (currentStatus) {
-                            context.mainExecutor.execute {
-                                result.success("Service is already connected")
+                            DeviceType.TACTILION -> {
+                                bindTactilion(result)
                             }
-                            return@Thread
-                        }
-                        
-                        // Attempt to bind with timeout to prevent hanging
-                        Log.i("TiggPrinter", "Attempting service bind...")
-                        val bindResult = AppService.me().bindService()
-                        Log.i("TiggPrinter", "Bind service result: $bindResult")
-                        
-                        // Short wait for connection - reduced from 2s to 1s
-                        Thread.sleep(1000)
-                        val finalStatus = AppService.me()?.isServiceConnected() ?: false
-                        Log.i("TiggPrinter", "Service connection status after bind: $finalStatus")
-                        
-                        // Return result on main thread
-                        context.mainExecutor.execute {
-                            if (finalStatus) {
-                                result.success("Service bound and connected successfully")
-                            } else {
-                                result.error("BIND_FAILED", "Service bind initiated but connection failed. TiggPrinter service may not be running.", null)
+                            DeviceType.UNKNOWN -> {
+                                context.mainExecutor.execute {
+                                    result.error("UNKNOWN_DEVICE", "Cannot bind service for unknown device type", null)
+                                }
                             }
                         }
                         
@@ -131,9 +1084,26 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
             "isServiceConnected" -> {
                 try {
-                    val isConnected = AppService.me()?.isServiceConnected() ?: false
-                    Log.i("TiggPrinter", "Service connection check: $isConnected")
-                    result.success(isConnected)
+                    when (detectedDeviceType) {
+                        DeviceType.FEWAPOS -> {
+                            val isConnected = AppService.me()?.isServiceConnected() ?: false
+                            Log.i("TiggPrinter", "FewaPos service connection check: $isConnected")
+                            result.success(isConnected)
+                        }
+                        DeviceType.TACTILION -> {
+                            // For Tactilion, check both ServiceManager and PrintService availability
+                            val serviceManagerConnected = isServiceManagerInitialized && printerBinder != null
+                            val printServiceConnected = tactilionPrintService != null
+                            val isConnected = serviceManagerConnected || printServiceConnected
+                            
+                            Log.i("TiggPrinter", "Tactilion service connection check - ServiceManager: $serviceManagerConnected, PrintService: $printServiceConnected, Overall: $isConnected")
+                            result.success(isConnected)
+                        }
+                        DeviceType.UNKNOWN -> {
+                            Log.i("TiggPrinter", "Unknown device - service connection: false")
+                            result.success(false)
+                        }
+                    }
                 } catch (e: Exception) {
                     Log.e("TiggPrinter", "Failed to check service connection", e)
                     result.error("CONNECTION_CHECK_FAILED", "Failed to check service connection: ${e.message}", null)
@@ -153,59 +1123,18 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     return
                 }
 
-                if (!BaseUtils.isValidBase64(base64Image)) {
-                    result.error("INVALID_BASE64", "Invalid Base64 image data format", null)
-                    return
-                }
-
                 try {
-                    // Check if service is available and connected
-                    if (AppService.me() == null) {
-                        result.error("SERVICE_UNAVAILABLE", "Printer service is not initialized", null)
-                        return
-                    }
-                    
-                    if (!AppService.me().isServiceConnected()) {
-                        result.error("SERVICE_NOT_CONNECTED", "Printer service is not connected. Please bind service first.", null)
-                        return
-                    }
-
-                    // Convert base64 to bitmap
-                    val decodedBytes = Base64.decode(base64Image, Base64.DEFAULT)
-                    val bitmap = BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
-                    
-                    if (bitmap == null) {
-                        result.error("INVALID_IMAGE", "Could not decode base64 image data", null)
-                        return
-                    }
-
-                    // Use the startPrinting method from AppService for bitmap printing
-                    AppService.me().startPrinting(bitmap, true, object : IPaymentCallback.Stub() {
-                        override fun onSuccess(success: Boolean, message: String?) {
-                            // Ensure callback runs on main thread
-                            context.mainExecutor.execute {
-                                if (success) {
-                                    result.success(mapOf(
-                                        "success" to true,
-                                        "message" to "Image printed successfully"
-                                    ))
-                                } else {
-                                    result.error("PRINT_FAILED", message ?: "Print operation failed", null)
-                                }
-                            }
+                    when (detectedDeviceType) {
+                        DeviceType.FEWAPOS -> {
+                            printBase64ImageFewaPos(base64Image, textSize, result)
                         }
-                        
-                        override fun onResponse(response: Bundle?) {
-                            // Handle any additional response data if needed
-                            Log.d("TiggPrinter", "Print response received: $response")
+                        DeviceType.TACTILION -> {
+                            printBase64ImageTactilion(base64Image, textSize, result)
                         }
-                    })
-                } catch (e: RemoteException) {
-                    result.error("REMOTE_EXCEPTION", "Printer service communication error: ${e.message}", null)
-                } catch (e: IllegalArgumentException) {
-                    result.error("INVALID_INPUT", "Invalid input parameters: ${e.message}", null)
-                } catch (e: OutOfMemoryError) {
-                    result.error("MEMORY_ERROR", "Not enough memory to process image: ${e.message}", null)
+                        DeviceType.UNKNOWN -> {
+                            result.error("UNKNOWN_DEVICE", "Cannot print - unknown device type", null)
+                        }
+                    }
                 } catch (e: Exception) {
                     result.error("PRINT_EXCEPTION", "Unexpected error during printing: ${e.message}", null)
                 }
@@ -284,81 +1213,41 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             //     }
             // }
             "printText" -> {
-    val text = call.argument<String>("text")
-    val textSize = call.argument<Int>("textSize") ?: 24
-    val paperWidth = call.argument<Int>("paperWidth") ?: 384 // Default to 58mm paper
+                val text = call.argument<String>("text")
+                val textSize = call.argument<Int>("textSize") ?: 24
+                val paperWidth = call.argument<Int>("paperWidth") ?: 384 // Default to 58mm paper
 
-    if (text.isNullOrEmpty()) {
-        result.error("INVALID_INPUT", "Text is required", null)
-        return
-    }
+                if (text.isNullOrEmpty()) {
+                    result.error("INVALID_INPUT", "Text is required", null)
+                    return
+                }
 
-    if (textSize <= 0 || textSize > 100) {
-        result.error("INVALID_INPUT", "Text size must be between 1 and 100", null)
-        return
-    }
+                if (textSize <= 0 || textSize > 100) {
+                    result.error("INVALID_INPUT", "Text size must be between 1 and 100", null)
+                    return
+                }
 
-    if (paperWidth <= 0 || paperWidth > 1000) {
-        result.error("INVALID_INPUT", "Paper width must be between 1 and 1000 pixels", null)
-        return
-    }
+                if (paperWidth <= 0 || paperWidth > 1000) {
+                    result.error("INVALID_INPUT", "Paper width must be between 1 and 1000 pixels", null)
+                    return
+                }
 
-    try {
-        if (AppService.me() == null) {
-            result.error("SERVICE_UNAVAILABLE", "Printer service is not initialized", null)
-            return
-        }
-
-        // Attempt re-bind if not connected
-        if (!AppService.me().isServiceConnected()) {
-            Log.w("TiggPrinter", "Service not connected. Attempting re-bind before printing...")
-            AppService.me().bindService()
-            Thread.sleep(1000) // Wait for binding
-        }
-
-        if (!AppService.me().isServiceConnected()) {
-            result.error("SERVICE_NOT_CONNECTED", "Printer service is still not connected after retry", null)
-            return
-        }
-
-        val bitmap = createTextBitmap(text, textSize, paperWidth)
-        if (bitmap == null) {
-            result.error("TEXT_RENDER_ERROR", "Could not create text bitmap", null)
-            return
-        }
-
-        Log.d("TiggPrinter", "Starting print job...")
-
-        AppService.me().startPrinting(bitmap, false, object : IPaymentCallback.Stub() {
-            override fun onSuccess(success: Boolean, message: String?) {
-                Log.d("TiggPrinter", "Print callback - onSuccess: success=$success, message=$message")
-                context.mainExecutor.execute {
-                    if (success) {
-                        val response = mapOf<String, Any?>(
-                            "success" to true,
-                            "message" to (message ?: "Printed successfully")
-                        )
-                        result.success(response)
-                    } else {
-                        result.error("PRINT_FAILED", message ?: "Print operation failed", null)
+                try {
+                    when (detectedDeviceType) {
+                        DeviceType.FEWAPOS -> {
+                            printTextFewaPos(text, textSize, paperWidth, result)
+                        }
+                        DeviceType.TACTILION -> {
+                            printTextTactilion(text, textSize, paperWidth, result)
+                        }
+                        DeviceType.UNKNOWN -> {
+                            result.error("UNKNOWN_DEVICE", "Cannot print - unknown device type", null)
+                        }
                     }
+                } catch (e: Exception) {
+                    result.error("PRINT_EXCEPTION", "Unexpected error during printing: ${e.message}", null)
                 }
             }
-
-            override fun onResponse(response: Bundle?) {
-                
-                Log.d("TiggPrinter", "Print callback - onResponse: $response")
-            }
-        })
-
-    } catch (e: RemoteException) {
-        result.error("REMOTE_EXCEPTION", "Printer service communication error: ${e.message}", null)
-    } catch (e: IllegalArgumentException) {
-        result.error("INVALID_INPUT", "Invalid input parameters: ${e.message}", null)
-    } catch (e: Exception) {
-        result.error("PRINT_EXCEPTION", "Unexpected error during printing: ${e.message}", null)
-    }
-}
             "printRawBytes" -> {
                 val bytes = call.argument<List<Int>>("bytes")
                 val useDirectString = call.argument<Boolean>("useDirectString") ?: false
@@ -386,96 +1275,64 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
 
                 try {
-                    if (AppService.me() == null) {
-                        result.error("SERVICE_UNAVAILABLE", "Printer service is not initialized", null)
-                        return
-                    }
-
-                    // Attempt re-bind if not connected
-                    if (!AppService.me().isServiceConnected()) {
-                        Log.w("TiggPrinter", "Service not connected. Attempting re-bind before printing...")
-                        AppService.me().bindService()
-                        Thread.sleep(1000) // Wait for binding
-                    }
-
-                    if (!AppService.me().isServiceConnected()) {
-                        result.error("SERVICE_NOT_CONNECTED", "Printer service is still not connected after retry", null)
-                        return
-                    }
-
-                    // Convert List<Int> to ByteArray
-                    val byteArray = bytes.map { it.toByte() }.toByteArray()
-                    val escPosString = String(byteArray, Charsets.ISO_8859_1)
-                    
-                    Log.d("TiggPrinter", "Printing raw ESC/POS bytes, length: ${byteArray.size}, useDirectString: $useDirectString")
-
-                    if (useDirectString) {
-                        // Method 1: Direct string approach (may show default header)
-                        Log.d("TiggPrinter", "*** USING STRING METHOD (may show default header) ***")
-                        AppService.me().startPrinting(escPosString, textSize, object : IPaymentCallback.Stub() {
-                            override fun onSuccess(success: Boolean, message: String?) {
-                                Log.d("TiggPrinter", "Raw bytes (string) print callback - onSuccess: success=$success, message=$message")
-                                context.mainExecutor.execute {
-                                    if (success) {
-                                        result.success(mapOf(
-                                            "success" to true,
-                                            "message" to "Raw bytes printed successfully (string method)"
-                                        ))
-                                    } else {
-                                        result.error("PRINT_FAILED", message ?: "Raw bytes print operation failed", null)
-                                    }
-                                }
-                            }
-
-                            override fun onResponse(response: Bundle?) {
-                                Log.d("TiggPrinter", "Raw bytes (string) print callback - onResponse: $response")
-                            }
-                        })
-                    } else {
-                        // Method 2: Create minimal bitmap to avoid default header
-                        Log.d("TiggPrinter", "*** USING BITMAP METHOD (clean, no header) ***")
-                        val rawBitmap = createMinimalEscPosBitmap(escPosString,paperWidth)
-                        if (rawBitmap == null) {
-                            result.error("RAW_DATA_ERROR", "Could not process ESC/POS data", null)
-                            return
+                    when (detectedDeviceType) {
+                        DeviceType.FEWAPOS -> {
+                            printRawBytesFewaPos(bytes, useDirectString, textSize, paperWidth, result)
                         }
-                        
-                        AppService.me().startPrinting(rawBitmap, false, object : IPaymentCallback.Stub() {
-                            override fun onSuccess(success: Boolean, message: String?) {
-                                Log.d("TiggPrinter", "Raw bytes (bitmap) print callback - onSuccess: success=$success, message=$message")
-                                context.mainExecutor.execute {
-                                    if (success) {
-                                        result.success(mapOf(
-                                            "success" to true,
-                                            "message" to "Raw bytes printed successfully (bitmap method)"
-                                        ))
-                                    } else {
-                                        result.error("PRINT_FAILED", message ?: "Raw bytes print operation failed", null)
-                                    }
-                                }
-                            }
-
-                            override fun onResponse(response: Bundle?) {
-                                Log.d("TiggPrinter", "Raw bytes (bitmap) print callback - onResponse: $response")
-                            }
-                        })
+                        DeviceType.TACTILION -> {
+                            printRawBytesTactilion(bytes, useDirectString, textSize, paperWidth, result)
+                        }
+                        DeviceType.UNKNOWN -> {
+                            result.error("UNKNOWN_DEVICE", "Cannot print - unknown device type", null)
+                        }
                     }
-
-                } catch (e: RemoteException) {
-                    result.error("REMOTE_EXCEPTION", "Printer service communication error: ${e.message}", null)
-                } catch (e: IllegalArgumentException) {
-                    result.error("INVALID_INPUT", "Invalid input parameters: ${e.message}", null)
                 } catch (e: Exception) {
                     result.error("PRINT_EXCEPTION", "Unexpected error during raw bytes printing: ${e.message}", null)
                 }
             }
 
+            "getAvailablePrinters" -> {
+                getAvailablePrinters(result)
+            }
+            "tryServiceManagerInit" -> {
+                // Manual ServiceManager initialization for testing
+                Thread {
+                    try {
+                        val success = tryServiceManagerInitialization()
+                        context.mainExecutor.execute {
+                            if (success) {
+                                result.success(mapOf(
+                                    "success" to true,
+                                    "message" to "ServiceManager initialized successfully"
+                                ))
+                            } else {
+                                result.success(mapOf(
+                                    "success" to false,
+                                    "message" to "ServiceManager initialization failed"
+                                ))
+                            }
+                        }
+                    } catch (e: Exception) {
+                        context.mainExecutor.execute {
+                            result.error("INIT_ERROR", "ServiceManager initialization error: ${e.message}", null)
+                        }
+                    }
+                }.start()
+            }
+            "selectPrinter" -> {
+                selectPrinter(call, result)
+            }
             else -> result.notImplemented()
         }
     }
 
     override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
+    }
+
+    // Helper function to safely get error message from exceptions
+    private fun getErrorMessage(e: Exception): String {
+        return e.message ?: "Unknown error"
     }
 
     private fun createTextBitmap(text: String, textSize: Int, paperWidth: Int): Bitmap? {
@@ -1321,5 +2178,221 @@ class TiggPrinterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         
         return false
+    }
+    
+    private fun getAvailablePrinters(result: MethodChannel.Result) {
+        try {
+            when (detectedDeviceType) {
+                DeviceType.FEWAPOS -> {
+                    result.success(mapOf(
+                        "success" to true,
+                        "deviceType" to "fewapos",
+                        "printers" to listOf(
+                            mapOf(
+                                "name" to "FewaPos Built-in Printer",
+                                "status" to if (AppService.me()?.isServiceConnected() == true) "connected" else "disconnected"
+                            )
+                        )
+                    ))
+                }
+                DeviceType.TACTILION -> {
+                    // For Tactilion, provide detailed status information
+                    val serviceManagerAvailable = isServiceManagerInitialized && printerBinder != null
+                    val printServiceAvailable = tactilionPrintService != null
+                    
+                    if (serviceManagerAvailable) {
+                        // Try to get detailed printer info from ServiceManager
+                        try {
+                            val printerInfoList = printerBinder?.getPrinterInfo()
+                            val printerCount = printerBinder?.getPrinterNum() ?: 0
+                            val currentPrinter = printerBinder?.getPrinterInfoForNow()
+                            
+                            val printersList = mutableListOf<Map<String, Any>>()
+                            
+                            if (printerInfoList != null && printerInfoList.isNotEmpty()) {
+                                printerInfoList.forEachIndexed { index, info ->
+                                    printersList.add(mapOf(
+                                        "id" to info.getId(),
+                                        "name" to (info.getName() ?: "Tactilion Printer $index"),
+                                        "type" to info.getType(),
+                                        "mac" to (info.getMac() ?: "N/A"),
+                                        "status" to "available",
+                                        "isCurrent" to (info.getId() == currentPrinter?.getId()),
+                                        "source" to "ServiceManager",
+                                        "description" to info.toNormalString()
+                                    ))
+                                }
+                            } else {
+                                printersList.add(mapOf(
+                                    "id" to 0,
+                                    "name" to "Tactilion Built-in Printer (ServiceManager)",
+                                    "type" to "built-in",
+                                    "status" to "available",
+                                    "isCurrent" to true,
+                                    "source" to "ServiceManager"
+                                ))
+                            }
+                            
+                            // Add device info if available
+                            val deviceInfo = mutableMapOf<String, Any>()
+                            try {
+                                deviceInfoBinder?.let { binder ->
+                                    deviceInfo["deviceType"] = binder.getDeviceType() ?: "unknown"
+                                    deviceInfo["serialNumber"] = binder.getSN() ?: "N/A"
+                                    deviceInfo["vid"] = binder.getVID() ?: "N/A"
+                                    deviceInfo["vendorName"] = binder.getVName() ?: "N/A"
+                                    deviceInfo["sdkVersion"] = binder.getSDKVersion() ?: "N/A"
+                                    deviceInfo["systemVersion"] = binder.getSystemVersion() ?: "N/A"
+                                    deviceInfo["ksn"] = binder.getKSN() ?: "N/A"
+                                }
+                            } catch (e: Exception) {
+                                Log.w("TiggPrinter", "Could not get device info: ${e.message}")
+                                deviceInfo["error"] = e.message ?: "Unknown error"
+                            }
+                            
+                            result.success(mapOf(
+                                "success" to true,
+                                "deviceType" to "tactilion",
+                                "printerCount" to printerCount,
+                                "currentPrinter" to currentPrinter?.toNormalString(),
+                                "currentPrinterId" to (currentPrinter?.getId() ?: -1),
+                                "serviceManagerAvailable" to true,
+                                "printServiceAvailable" to printServiceAvailable,
+                                "deviceInfo" to deviceInfo,
+                                "printers" to printersList
+                            ))
+                        } catch (e: Exception) {
+                            Log.e("TiggPrinter", "Error getting ServiceManager printer info: ${e.message}")
+                            // Fall through to alternative reporting
+                        }
+                    }
+                    
+                    // If ServiceManager not available or failed, provide basic status
+                    if (!serviceManagerAvailable) {
+                        val printersList = mutableListOf<Map<String, Any>>()
+                        
+                        if (printServiceAvailable) {
+                            printersList.add(mapOf(
+                                "id" to 0,
+                                "name" to "Tactilion Built-in Printer (PrintService)",
+                                "status" to "available",
+                                "source" to "PrintService"
+                            ))
+                        } else {
+                            printersList.add(mapOf(
+                                "id" to 0,
+                                "name" to "Tactilion Printer (Permission Denied)",
+                                "status" to "permission_error",
+                                "source" to "none",
+                                "error" to "SDK requires system-level permissions"
+                            ))
+                        }
+                        
+                        result.success(mapOf(
+                            "success" to true,
+                            "deviceType" to "tactilion",
+                            "serviceManagerAvailable" to false,
+                            "printServiceAvailable" to printServiceAvailable,
+                            "printers" to printersList,
+                            "permissionIssue" to !printServiceAvailable,
+                            "message" to if (!printServiceAvailable) 
+                                "Tactilion device detected but SDK requires system-level permissions" 
+                                else "Using PrintService fallback"
+                        ))
+                    }
+                }
+                DeviceType.UNKNOWN -> {
+                    result.success(mapOf(
+                        "success" to false,
+                        "deviceType" to "unknown",
+                        "printers" to emptyList<Map<String, Any>>(),
+                        "error" to "Device type not detected"
+                    ))
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("TiggPrinter", "Error in getAvailablePrinters: ${e.message}", e)
+            result.error("PRINTER_INFO_ERROR", "Failed to get printer information: ${e.message}", null)
+        }
+    }
+
+    private fun selectPrinter(call: MethodCall, result: MethodChannel.Result) {
+        try {
+            val printerId = call.argument<Int>("printerId") ?: 0
+            Log.i("TiggPrinter", "selectPrinter called with ID: $printerId for device type: $detectedDeviceType")
+
+            when (detectedDeviceType) {
+                DeviceType.FEWAPOS -> {
+                    // FewaPos typically has a single built-in printer
+                    result.success(mapOf(
+                        "success" to true,
+                        "deviceType" to "fewapos",
+                        "message" to "FewaPos uses built-in printer (ID selection not applicable)",
+                        "selectedPrinterId" to 0
+                    ))
+                }
+                DeviceType.TACTILION -> {
+                    // Use Tactilion ServiceManager to select printer
+                    if (isServiceManagerInitialized && printerBinder != null) {
+                        try {
+                            val success = printerBinder?.selectPosPrinter(printerId)
+                            if (success == true) {
+                                // Get the now-selected printer info
+                                val currentPrinter = printerBinder?.getPrinterInfoForNow()
+                                
+                                result.success(mapOf(
+                                    "success" to true,
+                                    "deviceType" to "tactilion",
+                                    "message" to "Printer selected successfully",
+                                    "selectedPrinterId" to printerId,
+                                    "currentPrinter" to currentPrinter?.toNormalString(),
+                                    "currentPrinterName" to (currentPrinter?.getName() ?: "Unknown"),
+                                    "currentPrinterMac" to (currentPrinter?.getMac() ?: "N/A"),
+                                    "source" to "ServiceManager"
+                                ))
+                                Log.i("TiggPrinter", "Successfully selected Tactilion printer ID: $printerId")
+                            } else {
+                                result.success(mapOf(
+                                    "success" to false,
+                                    "deviceType" to "tactilion",
+                                    "error" to "Failed to select printer ID: $printerId",
+                                    "message" to "selectPosPrinter returned false"
+                                ))
+                                Log.w("TiggPrinter", "Failed to select Tactilion printer ID: $printerId - selectPosPrinter returned false")
+                            }
+                        } catch (e: Exception) {
+                            Log.e("TiggPrinter", "Exception during printer selection: ${e.message}", e)
+                            result.success(mapOf(
+                                "success" to false,
+                                "deviceType" to "tactilion",
+                                "error" to "Exception during printer selection: ${e.message}",
+                                "selectedPrinterId" to printerId
+                            ))
+                        }
+                    } else {
+                        // ServiceManager not available, but we can still track the intended selection
+                        result.success(mapOf(
+                            "success" to false,
+                            "deviceType" to "tactilion",
+                            "error" to "ServiceManager not initialized",
+                            "message" to "Cannot select printer - ServiceManager not available due to permission restrictions",
+                            "selectedPrinterId" to printerId,
+                            "permissionIssue" to true
+                        ))
+                        Log.w("TiggPrinter", "Cannot select printer - ServiceManager not available")
+                    }
+                }
+                DeviceType.UNKNOWN -> {
+                    result.success(mapOf(
+                        "success" to false,
+                        "deviceType" to "unknown",
+                        "error" to "Cannot select printer for unknown device type"
+                    ))
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("TiggPrinter", "Error in selectPrinter: ${e.message}", e)
+            result.error("PRINTER_SELECT_ERROR", "Failed to select printer: ${e.message}", null)
+        }
     }
 }

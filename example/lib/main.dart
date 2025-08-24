@@ -1,5 +1,3 @@
-import 'dart:developer';
-
 import 'package:flutter/material.dart';
 import 'dart:async';
 
@@ -23,6 +21,7 @@ class _MyAppState extends State<MyApp> {
   bool _isServiceConnected = false;
   double _textSize = 24.0;
   int _paperWidth = 384; // Default to 58mm paper (384px)
+  DeviceType _deviceType = DeviceType.unknown;
 
   final String _exampleBase64Image =
       '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=';
@@ -30,7 +29,25 @@ class _MyAppState extends State<MyApp> {
   @override
   void initState() {
     super.initState();
-    _checkServiceStatus();
+    _initializeDevice();
+  }
+
+  Future<void> _initializeDevice() async {
+    try {
+      // Get device type first
+      final deviceType = await TiggPrinter.getDeviceType();
+      setState(() {
+        _deviceType = deviceType;
+      });
+
+      // Then check service status
+      await _checkServiceStatus();
+    } catch (e) {
+      setState(() {
+        _deviceType = DeviceType.unknown;
+        _printStatus = 'Device initialization failed: $e';
+      });
+    }
   }
 
   Future<void> _checkServiceStatus() async {
@@ -480,6 +497,167 @@ class _MyAppState extends State<MyApp> {
     }
   }
 
+  Future<void> _getAvailablePrinters() async {
+    setState(() {
+      _isPrinting = true;
+      _printStatus = 'Getting available printers...';
+    });
+
+    try {
+      final result = await TiggPrinter.getAvailablePrinters();
+
+      if (result['success'] == true) {
+        final deviceType = result['deviceType'] ?? 'unknown';
+        final printers = result['printers'] as List? ?? [];
+        final printerCount = result['printerCount'] ?? printers.length;
+
+        String statusMessage = 'Available Printers ($deviceType):\\n';
+        statusMessage += 'Total: $printerCount\\n\\n';
+
+        if (printers.isNotEmpty) {
+          for (var i = 0; i < printers.length; i++) {
+            final printer = printers[i];
+            Map<String, dynamic> printerMap;
+
+            // Safely convert to Map<String, dynamic>
+            if (printer is Map<String, dynamic>) {
+              printerMap = printer;
+            } else if (printer is Map) {
+              printerMap = Map<String, dynamic>.from(printer);
+            } else {
+              printerMap = {'name': 'Invalid printer data', 'status': 'error'};
+            }
+
+            final name = printerMap['name'] ?? 'Unknown Printer';
+            final status = printerMap['status'] ?? 'unknown';
+            final isCurrent = printerMap['isCurrent'] == true;
+
+            statusMessage += '${i + 1}. $name\\n';
+            statusMessage += '   Status: $status';
+            if (isCurrent) statusMessage += ' (Current)';
+            statusMessage += '\\n';
+
+            if (printerMap.containsKey('error')) {
+              statusMessage += '   Error: ${printerMap['error']}\\n';
+            }
+            statusMessage += '\\n';
+          }
+        } else {
+          statusMessage += 'No printers found.\\n';
+        }
+
+        if (result.containsKey('currentPrinter')) {
+          statusMessage += 'Current: ${result['currentPrinter']}';
+        }
+
+        setState(() {
+          _printStatus = statusMessage;
+        });
+      } else {
+        setState(() {
+          _printStatus =
+              'Failed to get printers: ${result['error'] ?? 'Unknown error'}';
+        });
+      }
+    } on TiggPrinterException catch (e) {
+      setState(() {
+        _printStatus = 'Get printers failed (${e.code}): ${e.message}';
+      });
+    } catch (e) {
+      setState(() {
+        _printStatus = 'Get printers error: $e';
+      });
+    } finally {
+      setState(() {
+        _isPrinting = false;
+      });
+    }
+  }
+
+  Future<void> _selectPrinter(int printerId) async {
+    setState(() {
+      _isPrinting = true;
+      _printStatus = 'Selecting printer ID: $printerId...';
+    });
+
+    try {
+      final result = await TiggPrinter.selectPrinter(printerId: printerId);
+
+      if (result['success'] == true) {
+        final deviceType = result['deviceType'] ?? 'unknown';
+        final selectedId = result['selectedPrinterId'] ?? printerId;
+        final currentPrinter = result['currentPrinter'] ?? 'N/A';
+        final currentPrinterName = result['currentPrinterName'] ?? 'Unknown';
+        final source = result['source'] ?? 'unknown';
+
+        setState(() {
+          _printStatus = 'Printer Selection Success!\n\n'
+              'Device Type: $deviceType\n'
+              'Selected ID: $selectedId\n'
+              'Current Printer: $currentPrinterName\n'
+              'Details: $currentPrinter\n'
+              'Source: $source';
+        });
+      } else {
+        final error = result['error'] ?? 'Unknown error';
+        final message = result['message'] ?? '';
+        final permissionIssue = result['permissionIssue'] == true;
+
+        setState(() {
+          _printStatus = 'Printer Selection Failed!\n\n'
+              'Error: $error\n'
+              '${message.isNotEmpty ? 'Message: $message\n' : ''}'
+              '${permissionIssue ? 'Note: This may be due to permission restrictions\n' : ''}'
+              'Selected ID: $printerId';
+        });
+      }
+    } on TiggPrinterException catch (e) {
+      setState(() {
+        _printStatus = 'Select printer failed (${e.code}): ${e.message}';
+      });
+    } catch (e) {
+      setState(() {
+        _printStatus = 'Select printer error: $e';
+      });
+    } finally {
+      setState(() {
+        _isPrinting = false;
+      });
+    }
+  }
+
+  Future<void> _tryServiceManagerInit() async {
+    setState(() {
+      _isPrinting = true;
+      _printStatus = 'Attempting ServiceManager initialization...';
+    });
+
+    try {
+      const platform = MethodChannel('tigg_printer');
+      final result = await platform.invokeMethod('tryServiceManagerInit');
+      final success = result['success'] as bool? ?? false;
+      final message = result['message'] as String? ?? 'Unknown result';
+
+      setState(() {
+        _printStatus = success
+            ? 'ServiceManager Init: SUCCESS\\n$message'
+            : 'ServiceManager Init: FAILED\\n$message';
+      });
+    } on PlatformException catch (e) {
+      setState(() {
+        _printStatus = 'ServiceManager Init Error (${e.code}): ${e.message}';
+      });
+    } catch (e) {
+      setState(() {
+        _printStatus = 'ServiceManager Init Error: $e';
+      });
+    } finally {
+      setState(() {
+        _isPrinting = false;
+      });
+    }
+  }
+
   void _resetState() {
     setState(() {
       _isPrinting = false;
@@ -501,6 +679,41 @@ class _MyAppState extends State<MyApp> {
                   'Status: $_printStatus',
                   textAlign: TextAlign.center,
                   style: const TextStyle(fontSize: 18),
+                ),
+                const SizedBox(height: 8),
+                // Device type indicator
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _getDeviceTypeColor().withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: _getDeviceTypeColor(),
+                      width: 1,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _getDeviceTypeIcon(),
+                        color: _getDeviceTypeColor(),
+                        size: 16,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Device: ${_deviceType.name.toUpperCase()}',
+                        style: TextStyle(
+                          color: _getDeviceTypeColor(),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 10),
                 // Service connection indicator
@@ -588,6 +801,81 @@ class _MyAppState extends State<MyApp> {
                   ),
                   child: const Text('Check Printer Availability'),
                 ),
+                const SizedBox(height: 10),
+                ElevatedButton(
+                  onPressed: _isPrinting ? null : _getAvailablePrinters,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.teal,
+                  ),
+                  child: const Text('Get Available Printers'),
+                ),
+                const SizedBox(height: 10),
+                // Printer selection buttons
+                if (_deviceType == DeviceType.tactilion) ...[
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed:
+                              _isPrinting ? null : () => _selectPrinter(0),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.indigo,
+                          ),
+                          child: const Text('Select Printer 0'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed:
+                              _isPrinting ? null : () => _selectPrinter(1),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.indigo,
+                          ),
+                          child: const Text('Select Printer 1'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 5),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed:
+                              _isPrinting ? null : () => _selectPrinter(2),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.indigo,
+                          ),
+                          child: const Text('Select Printer 2'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed:
+                              _isPrinting ? null : () => _selectPrinter(3),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.indigo,
+                          ),
+                          child: const Text('Select Printer 3'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                ],
+                // Only show ServiceManager test for Tactilion devices
+                if (_deviceType == DeviceType.tactilion)
+                  ElevatedButton(
+                    onPressed: _isPrinting ? null : _tryServiceManagerInit,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange,
+                    ),
+                    child: const Text('Try ServiceManager Init'),
+                  ),
                 const SizedBox(height: 20),
                 // Text Size Control
                 Card(
@@ -819,5 +1107,27 @@ class _MyAppState extends State<MyApp> {
         ),
       ),
     );
+  }
+
+  Color _getDeviceTypeColor() {
+    switch (_deviceType) {
+      case DeviceType.fewaPos:
+        return Colors.blue;
+      case DeviceType.tactilion:
+        return Colors.green;
+      case DeviceType.unknown:
+        return Colors.grey;
+    }
+  }
+
+  IconData _getDeviceTypeIcon() {
+    switch (_deviceType) {
+      case DeviceType.fewaPos:
+        return Icons.store;
+      case DeviceType.tactilion:
+        return Icons.print;
+      case DeviceType.unknown:
+        return Icons.help_outline;
+    }
   }
 }

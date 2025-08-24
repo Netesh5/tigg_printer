@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="cellBlueSelected">#C5DCEA</color>
+    <color name="colorAccent">#29abe2</color>
+    <color name="colorBorderPinPad">#4ABAE7</color>
+    <color name="colorPrimary">#0B3158</color>
+    <color name="colorPrimaryDark">#29abe2</color>
+    <color name="colorTextBtnPinPad">#3C3C3C</color>
+    <color name="darkText">#3D3D3D</color>
+    <color name="dividerBlue">#0E3559</color>
+    <color name="lightText">#727272</color>
+    <color name="titleBgColor">#F0F0F0</color>
+    <color name="white">#FFFFFF</color>
+    <string name="app_name_client">ASAPClient</string>
+    <string name="app_name_common">asap.common</string>
+    <string name="app_name_server">asap.server</string>
+    <string name="app_name_service">Aria.POS</string>
+    <string name="p2000l_module_name">Aria.POS</string>
+    <style name="AriaAppTheme" parent="Theme.AppCompat.Light.NoActionBar">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
+        <item name="android:textColor">#000000</item>
+        <item name="colorControlHighlight">#fff</item>
+        <item name="android:fontFamily">@font/arial</item>
+
+    </style>
+    <style name="SwitchTheme" parent="Theme.AppCompat.Light">
+        <item name="colorAccent">@color/colorPrimary</item>
+    </style>
+    <style name="ToolbarTheme" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="colorControlNormal">@color/white</item>
+    </style>
+</resources>

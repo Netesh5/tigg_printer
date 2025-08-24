@@ -1,0 +1,132 @@
+PLEASE_WAIT=ПОЖАЛУЙСТА\nПОДОЖДИТЕ
+TEL=тел.: 8-800-700-5555
+ERROR=Ошибка: %1
+PRESS_GREEN=нажмите на зеленую кнопку
+PRINT_ERROR=ОШИБКА\nПЕЧАТИ
+REPLACE_CHECK_TAPE=ЗАМЕНИТЕ\nЧЕКОВУЮ ЛЕНТУ
+ATTENTION=Внимание!
+SEE_PHONE=Посмотрите телефон
+USE_CHIP=Воспользуйтесь чипом
+INSER_OR_TAP_CARD=ВСТАВЬТЕ ИЛИ ПРИЛОЖИТЕ КАРТУ
+AMOUNT=Сумма: %1 %2
+INCORRECT_PIN=НЕКОРРЕКТНЫЙ\nPIN!
+REPEAT=ПОВТОРИТЕ!
+SWIPE_MAGSTRIPE=Проведите карту магнитной полосой
+ENTER_PIN=ВВЕДИТЕ PIN
+SELECT_APPLICATION=ВЫБЕРИТЕ ПРИЛОЖЕНИЕ
+TAKE_CARD=ЗАБЕРИТЕ\nКАРТУ!
+MANUAL=ИЛИ ВВЕДИТЕ КАРТУ<br><u><font color='#29abe2'>ВРУЧНУЮ</font></u>
+LOYALTY_CARD=ПОЖАЛУЙСТА, ПРОВЕДИТЕ\nКАРТУ ЛОЯЛЬНОСТИ
+CUT_CHECK=ОТОРВИТЕ ЧЕК
+
+ENABLE=Активно
+DISABLE=Неактивно
+
+ENTER_CARD_NUM=ВВЕДИТЕ НОМЕР КАРТЫ
+ENTER_EXP_DATE=ВВЕДИТЕ\nСРОК ДЕЙСТВИЯ (ММГГ):
+ENTER_CVV=ВВЕДИТЕ КОД CVV/CVC:
+
+NUM_PIN_TRIES=ОСТАЛОСЬ ПОПЫТОК:
+LAST_PIN_TRY=ПОСЛЕДНЯЯ ПОПЫТКА!
+WRONG_PIN=ПИН НЕВЕРЕН!
+
+OK=OK
+
+CONNECTION_STATUS=Статус соединения:
+SERIAL_NUMBER=Серийный номер:
+VERSION=Версия:
+KLK_KCV=KLK KCV:
+START_POS=НАЧАТЬ РАБОТУ
+SETUP_POS=НАСТРОИТЬ
+
+HELLO_STR=ПРИВЕТСТВУЮ!
+SETTINGS_MENU=МЕНЮ НАСТРОЕК
+ADMIN_MENU=АДМИНИСТРАТИВНОЕ МЕНЮ
+ENGINEER_MENU=ИНЖЕНЕРНОЕ МЕНЮ
+INPUT_PASSWORD=ВВЕДИТЕ ПАРОЛЬ
+INCORRECT_PASSWORD=НЕВЕРНЫЙ ПАРОЛЬ
+CANCEL=ОТМЕНА
+PASSWORD=Пароль
+
+ARIA_SETTINGS=ПАРАМЕТРЫ ARIA
+ABOUT_TERMINAL=О ТЕРМИНАЛЕ
+NETWORK_SETTINGS=НАСТРОЙКА СВЯЗИ
+CERTS_INFO=ИНФОРМАЦИЯ О СЕРТИФИКАТАХ
+
+CERTS_MANAG=УПРАВЛЕНИЕ СЕРТИФИКАТАМИ
+KEYS_MANAG=УПРАВЛЕНИЕ КЛЮЧАМИ
+ENGINEER_SETTINGS=НАСТРОЙКИ
+ENGINEER_SETTINGS_INFO=Настройки
+STR_ENGINEER_SETTINGS_AUTLOAD=Автозагрузка
+SETTINGS_DUKPT=Настройки DUKPT
+DUKPT_SETTINGS_TITLE=Настройки DUKPT
+USE_DUKPT_SETTING=Использовать DUKPT
+
+CERTIFICATES=СЕРТИФИКАТЫ
+STATUS=Статус
+ERROR_CERT=Ошибка
+MISSING=Отсутствует
+SIGN_ERROR=Ошибка подписи
+NOT_WHITELIST=В черном списке
+
+CERT=СЕРТИФИКАТ
+
+KEYS_INFO=ИНФОРМАЦИЯ О КЛЮЧАХ
+DELETING_KEYS=УДАЛЕНИЕ КЛЮЧЕЙ
+INPUT_KLK=ВВОД KLK
+LOAD_DUKPT=ЗАГРУЗКА DUKPT КЛЮЧЕЙ
+KEYS_DELETED=КЛЮЧИ УСПЕШНО УДАЛЕНЫ
+
+KEYS_STATUS=Состояние ключей
+KEYS=Ключи:
+
+CERT_DELETED=СЕРТИФИКАТ УСПЕШНО УДАЛЕН
+CERTS_CHAIN_AND_KEYS_OK=Пороверка цепочки сертификатов и ключевой пары - OK
+REMOTE_CA_SETTINGS=НАСТРОЙКА УДАЛЕННОГО УЦ
+GET_CERT_FROM_REMOTE_CA=ПОЛУЧИТЬ СЕРТИФИКАТЫ ОТ УДАЛЕННОГО УЦ
+GET_CERT_FROM_CAD=ПОЛУЧИТЬ СЕРТИФИКАТЫ С CAD
+DELETE_TERM_CERT=УДАЛИТЬ СЕРТИФИКАТ ТЕРМИНАЛА
+
+ARIA_SERVER_SETTINGS=НАСТРОЙКА СЕРВЕРА ARIA
+ADDRESS_SAVED=АДРЕС УСПЕШНО СОХРАНЕН
+CONNECTION_NAME=Название подключения
+DEFAULT_ADDRESS=Сервер по умолчанию
+ADDRESS_TYPE_IP=IP
+ADDRESS_TYPE_DNS=DNS
+
+ABOUT_TERMINAL_INFO=ИНФОРМАЦИЯ О ТЕРМИНАЛЕ
+BASIC_INFO=Основная информация:
+MODEL=Модель:
+CERTIFICATES_TERM_INFO=Сертификаты:
+CONNECTIONS=Подключения:
+EXTENDED_INFO=Расширенная информация:
+
+READ_WAITER_CARD=СЧИТАЙТЕ КАРТУ ОФИЦИАНТА
+
+NETWORK_NETWORK_ERROR_TITLE=Сетевая ошибка
+
+INCORRECT_MAC=Некорректный MAC
+CD_MSG_ERROR_NOT_FOUND_KSN=KSN не найден
+CD_MSG_ERROR_NOT_LOADED_MMAC=MMAC не загружен
+CD_MSG_ERROR_NOT_LOADED_MPIN=MPIN не загружен
+CD_MSG_ERROR_NOT_LOADED_SMAC=SMAC не загружен
+CD_MSG_ERROR_NOT_LOADED_SPIN=SPIN не загружен
+CD_MSG_ERROR_NOT_LOADED_DK=DK не загружен
+CD_MSG_ERROR_NOT_LOADED_TIK=TIK не загружен
+CD_MSG_ERROR_NOT_LOADED_TEMP_KEY=TEMP KEY не загружен
+CD_MSG_ERROR_NOT_LOADED_SYMMETRIC_KEY=SYMMETRIC KEY не загружен
+CD_MSG_ERROR_NOT_CALC_KCV_KLK=Ошибка расчета KCV для KLK
+CD_MSG_ERROR_NOT_CALC_KCV_MASTER_KEY=Ошибка расчета KCV для master-key
+CD_MSG_ERROR_NOT_CALC_KCV_SESSION_KEY=Ошибка расчета KCV для session-key
+CD_MSG_ERROR_NOT_CALC_MAC=Ошибка расчета MAC
+CANNOT_ENCRYPT_DATA=Ошибка шифрования
+CANNOT_ENCRYPT_SYMMETRIC_KEY_DATA=Ошибка шифрования симитричного ключа
+CANNOT_DECRYPT_SYMMETRIC_KEY_DATA=Ошибка дешифрования симитричного ключа
+
+REPEAT_BUTTON=Повторить
+CANCEL_BUTTON=Отменить
+
+OPERATION_COUNT=Количество операций:
+STOP_LISTS=Стоп листы:
+IS_MISSING=отсутствуют
+STOP_LISTS_WAS_UPLOADED=стоп-листы загружены
